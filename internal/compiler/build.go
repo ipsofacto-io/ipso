@@ -121,6 +121,19 @@ func writeTree(stage string, compiled []Compiled) error {
 	return nil
 }
 
+// ArtifactRel is the slash-separated path of one artifact in a build.
+func ArtifactRel(id string, index int, name string) (string, error) {
+	full, err := artifactPath("stage", id, index, name)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel("stage", full)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
 func artifactPath(stage, id string, index int, name string) (string, error) {
 	if !validSegment(id) || !fs.ValidPath(name) {
 		return "", &Error{Code: CodeArtifactName, Err: fmt.Errorf("artifact %q", name)}
