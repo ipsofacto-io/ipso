@@ -26,6 +26,32 @@ jobs:
           go-version-file: go.mod
       - run: go test ./...
 
+  bundle:
+    name: ci / bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install cosign
+        run: |
+          set -euo pipefail
+          version="3.1.4"
+          binary="cosign-linux-amd64"
+          checksum="424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa"
+          url="https://github.com/sigstore/cosign/releases/download/v${version}/${binary}"
+          tmp="${RUNNER_TEMP}/cosign-install"
+          mkdir -p "${tmp}/bin"
+          curl -fsSL -o "${tmp}/bin/cosign" "$url"
+          echo "${checksum}  ${tmp}/bin/cosign" | sha256sum -c -
+          chmod 0755 "${tmp}/bin/cosign"
+          echo "${tmp}/bin" >> "$GITHUB_PATH"
+      - run: go test -tags cosign ./internal/bundle
+
   lint:
     name: ci / lint
     runs-on: ubuntu-latest

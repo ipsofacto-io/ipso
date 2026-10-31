@@ -66,8 +66,24 @@ func LoadBuild(root string) (Build, error) {
 	if err != nil {
 		return Build{}, err
 	}
+	build, err := Materialize(raw, func(rel string) ([]byte, error) {
+		return readArtifact(buildRoot.FS(), rel)
+	})
+	if err != nil {
+		return Build{}, err
+	}
+	build.Root = dir
+	return build, nil
+}
+
+// Materialize checks a manifest and the artifact bytes it names.
+// open is called with the slash-separated path of each artifact.
+func Materialize(manifest []byte, open func(rel string) ([]byte, error)) (Build, error) {
+	if open == nil {
+		return Build{}, &Error{Code: CodeBuildManifest, Err: fmt.Errorf("missing artifacts")}
+	}
 	var decoded manifestFile
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+	if err := json.Unmarshal(manifest, &decoded); err != nil {
 		return Build{}, &Error{Code: CodeBuildManifest, Err: err}
 	}
 	files := make(map[string]map[string][]byte, len(decoded.Entries))
@@ -80,23 +96,26 @@ func LoadBuild(root string) (Build, error) {
 		}
 		got := make(map[string][]byte, len(entry.Artifacts))
 		for _, artifact := range entry.Artifacts {
-			if _, err := artifactPath(dir, entry.DecisionID, entry.CheckIndex, artifact.Name); err != nil {
+			rel, err := ArtifactRel(entry.DecisionID, entry.CheckIndex, artifact.Name)
+			if err != nil {
 				return Build{}, err
 			}
-			rel := filepath.ToSlash(filepath.Join(entry.DecisionID, fmt.Sprintf("%d", entry.CheckIndex), filepath.FromSlash(artifact.Name)))
-			body, err := readArtifact(buildRoot.FS(), rel)
+			body, err := open(rel)
 			if err != nil {
 				return Build{}, &Error{Code: codeOfRead(err), Err: fmt.Errorf("%s/%d/%s: %w", entry.DecisionID, entry.CheckIndex, artifact.Name, err)}
+			}
+			if len(body) > MaxRefBytes {
+				return Build{}, &Error{Code: CodeRefTooLarge, Err: fmt.Errorf("%s/%d/%s: artifact is %d bytes", entry.DecisionID, entry.CheckIndex, artifact.Name, len(body))}
 			}
 			sum := sha256.Sum256(body)
 			if hex.EncodeToString(sum[:]) != artifact.SHA256 {
 				return Build{}, &Error{Code: CodeBuildDigest, Err: fmt.Errorf("%s/%d/%s", entry.DecisionID, entry.CheckIndex, artifact.Name)}
 			}
-			got[artifact.Name] = body
+			got[artifact.Name] = append([]byte(nil), body...)
 		}
 		files[entryKey(entry)] = got
 	}
-	return Build{Root: dir, Manifest: raw, Entries: decoded.Entries, Files: files}, nil
+	return Build{Manifest: append([]byte(nil), manifest...), Entries: decoded.Entries, Files: files}, nil
 }
 
 func readArtifact(build fs.FS, rel string) ([]byte, error) {

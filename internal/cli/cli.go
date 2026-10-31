@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ipsofacto-io/ipso/internal/bundle"
 	"github.com/ipsofacto-io/ipso/internal/compiler"
 	"github.com/ipsofacto-io/ipso/internal/compiler/archunit"
 	"github.com/ipsofacto-io/ipso/internal/compiler/builtin"
@@ -80,6 +81,8 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 			return 2
 		}
 		return compileCmd(root, stdout, stderr, d)
+	case "bundle":
+		return bundleCmd(root, args[1:], stdout, stderr)
 	case "premise":
 		return premiseCmd(root, args[1:], stdout, stderr, d)
 	case "-h", "--help", "help", "version", "--version", "-v":
@@ -107,7 +110,7 @@ const usage = `ipso reads and compiles engineering decision records in a reposit
 usage:
   ipso init
   ipso check
-  ipso check plan <plan.json|-> [--env name] [--report file]
+  ipso check plan <plan.json|-> [--env name] [--report file] [--bundle dir --digest sha256:hex --key public.pem]
   ipso check ci <evidence.json|-> --sha <sha> [--env name] [--report file]
   ipso check checkov <results.json|-> [--env name] [--report file]
   ipso check depcruise <path>... [--env name] [--report file]
@@ -120,6 +123,9 @@ usage:
   ipso explain <slug>
   ipso import [path...]
   ipso premise check [--report file]
+  ipso bundle pack --layout dir
+  ipso bundle sign --layout dir --key private.pem
+  ipso bundle verify --layout dir --digest sha256:hex --key public.pem
   ipso compile`
 
 func initCmd(root string, stdout, stderr io.Writer) int {
@@ -209,7 +215,7 @@ func checkFiles(root string, stdout, stderr io.Writer) int {
 }
 
 const (
-	planUsage         = "usage: ipso check plan <plan.json|-> [--env name] [--report file]"
+	planUsage         = "usage: ipso check plan <plan.json|-> [--env name] [--report file] [--bundle dir --digest sha256:hex --key public.pem]"
 	ciUsage           = "usage: ipso check ci <evidence.json|-> --sha <sha> [--env name] [--report file]"
 	checkovUsage      = "usage: ipso check checkov <results.json|-> [--env name] [--report file]"
 	depcruiseUsage    = "usage: ipso check depcruise <path>... [--env name] [--report file]"
@@ -248,7 +254,12 @@ func planCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 		fprintln(stderr, err)
 		return 1
 	}
-	build, err := compiler.LoadBuild(root)
+	var build compiler.Build
+	if opts.bundle != "" {
+		build, err = bundle.Verify(opts.bundle, opts.digest, opts.key)
+	} else {
+		build, err = compiler.LoadBuild(root)
+	}
 	if err != nil {
 		fprintln(stderr, err)
 		return 1
@@ -966,6 +977,9 @@ type planOptions struct {
 	path   string
 	env    string
 	report string
+	bundle string
+	digest string
+	key    string
 }
 
 func parsePlanArgs(args []string) (planOptions, error) {
@@ -984,6 +998,24 @@ func parsePlanArgs(args []string) (planOptions, error) {
 			}
 			i++
 			opts.report = args[i]
+		case "--bundle":
+			if opts.bundle != "" || i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "-") {
+				return planOptions{}, fmt.Errorf("%s", planUsage)
+			}
+			i++
+			opts.bundle = args[i]
+		case "--digest":
+			if opts.digest != "" || i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "-") {
+				return planOptions{}, fmt.Errorf("%s", planUsage)
+			}
+			i++
+			opts.digest = args[i]
+		case "--key":
+			if opts.key != "" || i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "-") {
+				return planOptions{}, fmt.Errorf("%s", planUsage)
+			}
+			i++
+			opts.key = args[i]
 		default:
 			if strings.HasPrefix(args[i], "-") || opts.path != "" {
 				return planOptions{}, fmt.Errorf("%s", planUsage)
@@ -992,6 +1024,12 @@ func parsePlanArgs(args []string) (planOptions, error) {
 		}
 	}
 	if opts.path == "" {
+		return planOptions{}, fmt.Errorf("%s", planUsage)
+	}
+	if (opts.bundle != "") != (opts.digest != "") || (opts.bundle != "") != (opts.key != "") {
+		return planOptions{}, fmt.Errorf("%s", planUsage)
+	}
+	if opts.digest != "" && !bundle.ValidDigest(opts.digest) {
 		return planOptions{}, fmt.Errorf("%s", planUsage)
 	}
 	return opts, nil
