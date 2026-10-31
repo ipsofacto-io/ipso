@@ -15,8 +15,7 @@ import (
 )
 
 func TestCosignBlobSignature(t *testing.T) {
-	cosign, err := exec.LookPath("cosign")
-	if err != nil {
+	if _, err := exec.LookPath("cosign"); err != nil {
 		t.Fatal(err)
 	}
 	build := sampleBuild(t, []byte("package ipso\n"), "")
@@ -49,13 +48,13 @@ func TestCosignBlobSignature(t *testing.T) {
 	if err := os.WriteFile(bundlePath, wrapped, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runCosign(t, work, cosign, "verify-blob", "--key", pub, "--bundle", bundlePath, "--insecure-ignore-tlog", manifest)
+	runCosign(t, work, "verify-blob", "--key", pub, "--bundle", bundlePath, "--insecure-ignore-tlog", manifest)
 
 	keyDir := filepath.Join(work, "keys")
 	if err := os.MkdirAll(keyDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	runCosign(t, keyDir, cosign, "generate-key-pair")
+	runCosign(t, keyDir, "generate-key-pair")
 	payload := filepath.Join(keyDir, "payload")
 	if err := os.WriteFile(payload, loaded.manifest, 0o600); err != nil {
 		t.Fatal(err)
@@ -66,7 +65,7 @@ func TestCosignBlobSignature(t *testing.T) {
 		t.Fatal(err)
 	}
 	signed := filepath.Join(keyDir, "signed.json")
-	runCosign(t, keyDir, cosign, "sign-blob", "--yes", "--key", filepath.Join(keyDir, "cosign.key"), "--bundle", signed, "--signing-config", config, payload)
+	runCosign(t, keyDir, "sign-blob", "--yes", "--key", filepath.Join(keyDir, "cosign.key"), "--bundle", signed, "--signing-config", config, payload)
 	raw, err := os.ReadFile(signed)
 	if err != nil {
 		t.Fatal(err)
@@ -106,9 +105,9 @@ func cosignBundle(payload []byte, signature string) ([]byte, error) {
 	return json.Marshal(body)
 }
 
-func runCosign(t *testing.T, dir, bin string, args ...string) {
+func runCosign(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command("cosign", args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

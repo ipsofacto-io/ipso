@@ -80,7 +80,7 @@ func readTar(layer []byte) (manifest []byte, files map[string][]byte, err error)
 		if err != nil {
 			return nil, nil, layoutErr("tar")
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+		if hdr.Typeflag != tar.TypeReg {
 			return nil, nil, layoutErr("tar entry")
 		}
 		name, err := cleanEntry(hdr.Name)
