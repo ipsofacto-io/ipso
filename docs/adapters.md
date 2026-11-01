@@ -70,7 +70,7 @@ The input is the JSON that `pulumi preview --json` prints.
 
 - `address` is the URN, `type` is the Pulumi type token, such as `aws:s3/bucket:Bucket`, and `name` is the last part of the URN.
 - `after` is `newState.inputs`, and `before` is `oldState.inputs`. A step with no new state, such as a delete, has `after: null`.
-- `actions` follows the step's `op`: `same` is `no-op`, `create` and `create-replacement` are `create`, `update` is `update`, `replace` is `delete` and `create`, `delete` and `delete-replaced` are `delete`, and `read` and `refresh` are `read`. An `op` ipso does not know fails the input.
+- `actions` follows the step's `op`: `same` is `no-op`, `create` and `create-replacement` are `create`, `update` is `update`, `replace` is `delete` and `create`, `delete`, `delete-replaced`, and the discard operations are `delete`, and `read` and `refresh` are `read`. An `op` ipso does not know fails the input.
 
 Limits:
 

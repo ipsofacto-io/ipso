@@ -12,7 +12,7 @@ var pulumiActions = map[string][]string{
 	"replace":                {"delete", actionCreate},
 	"delete":                 {"delete"},
 	"delete-replaced":        {"delete"},
-	"discard":                {"delete"},
+	"read-discard":           {"delete"},
 	"discard-replaced":       {"delete"},
 	"remove-pending-replace": {"delete"},
 	"read":                   {"read"},

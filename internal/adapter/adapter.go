@@ -88,8 +88,7 @@ func formatErr(format string, args ...any) error {
 	return &compiler.Error{Code: CodeFormat, Err: fmt.Errorf(format, args...)}
 }
 
-// parseJSON decodes one JSON document and refuses anything after it, and a nesting that would
-// exhaust the walk that follows.
+// parseJSON decodes one JSON document and refuses anything after it.
 func parseJSON(raw []byte, what string, into any) error {
 	if err := json.Unmarshal(raw, into); err != nil {
 		return formatErr("expected %s", what)
