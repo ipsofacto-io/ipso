@@ -470,6 +470,50 @@ type CheckovReport struct {
 	Verdicts       []Verdict `json:"verdicts"`
 }
 
+// Judge turns the outcome of one check into its verdict. hard is true when a block-mode check has a
+// violation that nothing covers, or when the check failed to evaluate. It is the one rule behind exit 1.
+func Judge(entry Entry, outcome Outcome) (verdict Verdict, hard bool) {
+	verdict = Verdict{
+		DecisionID: entry.DecisionID,
+		Slug:       entry.Slug,
+		CheckIndex: entry.CheckIndex,
+		Mode:       entry.Mode,
+		Result:     "pass",
+	}
+	switch {
+	case outcome.Err != nil:
+		verdict.Result = "error"
+		return verdict, true
+	case len(outcome.Violations) > 0 && outcome.Waived:
+		verdict.Result = "waived"
+		verdict.Violations = len(outcome.Violations)
+		return verdict, false
+	case len(outcome.Violations) > 0:
+		covered := outcome.Baselined()
+		if covered == len(outcome.Violations) {
+			verdict.Result = "waived"
+			verdict.Violations = covered
+			return verdict, false
+		}
+		verdict.Result = "fail"
+		verdict.Violations = len(outcome.Violations) - covered
+		return verdict, entry.Mode == "block"
+	default:
+		return verdict, false
+	}
+}
+
+// Baselined counts the violations a baseline covers.
+func (o Outcome) Baselined() int {
+	covered := 0
+	for _, violation := range o.Violations {
+		if violation.Baselined {
+			covered++
+		}
+	}
+	return covered
+}
+
 // ReportVersion is the report contract version.
 const ReportVersion = 1
 
