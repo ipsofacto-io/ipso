@@ -98,16 +98,31 @@ func (o HelmOptions) Validate() error {
 	return nil
 }
 
-// tool is one pinned binary: the name on PATH, the arguments that print its version, and the release to require.
+// tool is one pinned binary: its name, how to start it, the arguments that print its version, and the
+// release to require. The command name is a literal, so Go resolves it with LookPath and refuses a
+// binary found relative to the current directory. No input of a render can name another program.
 type tool struct {
 	name        string
+	command     func(ctx context.Context, args ...string) *exec.Cmd
 	versionArgs []string
 	pin         string
 }
 
 var (
-	helmTool      = tool{name: "helm", versionArgs: []string{"version", "--short"}, pin: HelmVersion}
-	kustomizeTool = tool{name: "kustomize", versionArgs: []string{"version"}, pin: KustomizeVersion}
+	helmTool = tool{
+		name:        "helm",
+		command:     func(ctx context.Context, args ...string) *exec.Cmd { return exec.CommandContext(ctx, "helm", args...) },
+		versionArgs: []string{"version", "--short"},
+		pin:         HelmVersion,
+	}
+	kustomizeTool = tool{
+		name: "kustomize",
+		command: func(ctx context.Context, args ...string) *exec.Cmd {
+			return exec.CommandContext(ctx, "kustomize", args...)
+		},
+		versionArgs: []string{"version"},
+		pin:         KustomizeVersion,
+	}
 )
 
 // Helm renders one chart with helm template.
@@ -178,7 +193,7 @@ func renderWith(ctx context.Context, root string, bin tool, args []string, out s
 	if err := probe(ctx, bin, home); err != nil {
 		return Result{}, err
 	}
-	stdout, err := execTool(ctx, bin.name, args, home)
+	stdout, err := execTool(ctx, bin, args, home)
 	if err != nil {
 		return Result{}, err
 	}
@@ -287,15 +302,14 @@ func writeFile(repo *os.Root, final, temp string, body []byte) error {
 	return nil
 }
 
-// probe runs the tool's version command once. The command name is a literal, so Go resolves it with
-// LookPath and refuses a binary found relative to the current directory.
+// probe runs the tool's version command once.
 func probe(ctx context.Context, bin tool, home string) error {
 	if _, err := exec.LookPath(bin.name); err != nil {
 		return &compiler.Error{Code: CodeMissing, Err: fmt.Errorf("%s is not on PATH", bin.name)}
 	}
 	ctx, cancel := context.WithTimeout(ctx, versionTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin.name, bin.versionArgs...)
+	cmd := bin.command(ctx, bin.versionArgs...)
 	cmd.Dir = home
 	cmd.Env = sandboxEnv(home)
 	out, err := toolrun.Run(ctx, cmd, toolrun.Limits{Stdout: probeLimit, Stderr: stderrLimit, Wait: commandWait})
@@ -319,10 +333,10 @@ func parseVersion(raw []byte) string {
 	return strings.TrimPrefix(found, "v")
 }
 
-func execTool(ctx context.Context, name string, args []string, home string) ([]byte, error) {
+func execTool(ctx context.Context, bin tool, args []string, home string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, renderTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := bin.command(ctx, args...)
 	cmd.Dir = home
 	cmd.Env = sandboxEnv(home)
 	out, err := toolrun.Run(ctx, cmd, toolrun.Limits{Stdout: maxOutputBytes, Stderr: stderrLimit, Wait: commandWait})
@@ -333,11 +347,11 @@ func execTool(ctx context.Context, name string, args []string, home string) ([]b
 	var over *toolrun.OutputError
 	switch {
 	case errors.As(err, &timeout):
-		return nil, runErr("%s timed out", name)
+		return nil, runErr("%s timed out", bin.name)
 	case errors.As(err, &over):
-		return nil, &compiler.Error{Code: CodeOutput, Err: fmt.Errorf("%s printed more than %d bytes", name, maxOutputBytes)}
+		return nil, &compiler.Error{Code: CodeOutput, Err: fmt.Errorf("%s printed more than %d bytes", bin.name, maxOutputBytes)}
 	default:
-		return nil, runErr("%s failed: %s", name, toolrun.Excerpt(toolrun.Stderr(err), "no message"))
+		return nil, runErr("%s failed: %s", bin.name, toolrun.Excerpt(toolrun.Stderr(err), "no message"))
 	}
 }
 

@@ -30,7 +30,7 @@ func TestSandboxStopsRemoteFetch(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := execTool(context.Background(), "kustomize", []string{"build", dir, "--load-restrictor", "LoadRestrictionsRootOnly"}, t.TempDir())
+			_, err := execTool(context.Background(), kustomizeTool, []string{"build", dir, "--load-restrictor", "LoadRestrictionsRootOnly"}, t.TempDir())
 			var coded *compiler.Error
 			if !errors.As(err, &coded) || coded.Code != CodeRun {
 				t.Fatalf("err %v, want code %s", err, CodeRun)
