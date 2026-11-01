@@ -218,7 +218,12 @@ func (e Entry) Applies(env string, now time.Time) bool {
 
 // Selected reports whether the entry is an in-force OPA check for a Terraform plan.
 func (e Entry) Selected(env string, now time.Time) bool {
-	if e.Engine != opaEngine || e.Target != planTarget {
+	return e.SelectedFor(planTarget, env, now)
+}
+
+// SelectedFor reports whether the entry is an in-force OPA check for target.
+func (e Entry) SelectedFor(target, env string, now time.Time) bool {
+	if e.Engine != opaEngine || e.Target != target {
 		return false
 	}
 	return e.Applies(env, now)
@@ -470,12 +475,75 @@ type CheckovReport struct {
 	Verdicts       []Verdict `json:"verdicts"`
 }
 
+// AdapterReport is the verdict report for the checks that read another tool's plan or template.
+// It carries the hash of the input as read, never resource names, values, or messages.
+type AdapterReport struct {
+	ReportVersion int       `json:"report_version"`
+	IpsoVersion   string    `json:"ipso_version"`
+	EvaluatedAt   time.Time `json:"evaluated_at"`
+	Env           string    `json:"env"`
+	Adapter       string    `json:"adapter"`
+	InputSHA256   string    `json:"input_sha256"`
+	BuildSHA256   string    `json:"build_sha256"`
+	Verdicts      []Verdict `json:"verdicts"`
+}
+
+// Judge turns the outcome of one check into its verdict. hard is true when a block-mode check has a
+// violation that nothing covers, or when the check failed to evaluate. It is the one rule behind exit 1.
+func Judge(entry Entry, outcome Outcome) (verdict Verdict, hard bool) {
+	verdict = Verdict{
+		DecisionID: entry.DecisionID,
+		Slug:       entry.Slug,
+		CheckIndex: entry.CheckIndex,
+		Mode:       entry.Mode,
+		Result:     "pass",
+	}
+	switch {
+	case outcome.Err != nil:
+		verdict.Result = "error"
+		return verdict, true
+	case len(outcome.Violations) > 0 && outcome.Waived:
+		verdict.Result = "waived"
+		verdict.Violations = len(outcome.Violations)
+		return verdict, false
+	case len(outcome.Violations) > 0:
+		covered := outcome.Baselined()
+		if covered == len(outcome.Violations) {
+			verdict.Result = "waived"
+			verdict.Violations = covered
+			return verdict, false
+		}
+		verdict.Result = "fail"
+		verdict.Violations = len(outcome.Violations) - covered
+		return verdict, entry.Mode == "block"
+	default:
+		return verdict, false
+	}
+}
+
+// Baselined counts the violations a baseline covers.
+func (o Outcome) Baselined() int {
+	covered := 0
+	for _, violation := range o.Violations {
+		if violation.Baselined {
+			covered++
+		}
+	}
+	return covered
+}
+
 // ReportVersion is the report contract version.
 const ReportVersion = 1
 
 // MarshalReport encodes a plan report as deterministic JSON.
 // evaluated_at is UTC with a trailing Z and no fractional seconds.
 func MarshalReport(report PlanReport) ([]byte, error) {
+	report.EvaluatedAt, report.Verdicts = finishReport(report.EvaluatedAt, report.Verdicts)
+	return encodeReport(report)
+}
+
+// MarshalAdapterReport encodes an adapter report as deterministic JSON.
+func MarshalAdapterReport(report AdapterReport) ([]byte, error) {
 	report.EvaluatedAt, report.Verdicts = finishReport(report.EvaluatedAt, report.Verdicts)
 	return encodeReport(report)
 }

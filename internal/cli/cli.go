@@ -121,6 +121,9 @@ usage:
   ipso check plan <plan.json|-> [--env name] [--input name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]
   ipso check ci <evidence.json|-> --sha <sha> [--env name] [--report file] [--sarif file]
   ipso check checkov <results.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check pulumi <preview.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check cloudformation <template|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check arm <template.json|-> [--env name] [--input name] [--report file] [--sarif file]
   ipso check depcruise <path>... [--env name] [--input name] [--report file] [--sarif file]
   ipso check semgrep <path>... [--env name] [--input name] [--report file] [--sarif file]
   ipso check archunit <classes-dir>... --jars <dir> [--env name] [--input name] [--report file] [--sarif file]
@@ -165,6 +168,12 @@ func checkCmd(root string, args []string, stdout, stderr io.Writer, d deps) int 
 		return ciCmd(root, args[1:], stdout, stderr, d)
 	case "checkov":
 		return checkovCmd(root, args[1:], stdout, stderr, d)
+	case "pulumi":
+		return adapterCmd(root, args[1:], pulumiCheck, stdout, stderr, d)
+	case "cloudformation":
+		return adapterCmd(root, args[1:], cloudformationCheck, stdout, stderr, d)
+	case "arm":
+		return adapterCmd(root, args[1:], armCheck, stdout, stderr, d)
 	case "depcruise":
 		return depcruiseCmd(root, args[1:], stdout, stderr, d)
 	case "semgrep":
@@ -236,7 +245,7 @@ const (
 	kyvernoUsage      = "usage: ipso check kyverno <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	gatekeeperUsage   = "usage: ipso check gatekeeper <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	eslintUsage       = "usage: ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]"
-	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage
+	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + pulumiUsage + "\n" + cloudformationUsage + "\n" + armUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage
 )
 
 func planCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
@@ -1248,51 +1257,29 @@ func sameOutput(report, sarifPath string) bool {
 }
 
 func verdictOf(stdout io.Writer, entry compiler.Entry, outcome compiler.Outcome) (compiler.Verdict, bool) {
-	verdict := compiler.Verdict{
-		DecisionID: entry.DecisionID,
-		Slug:       entry.Slug,
-		CheckIndex: entry.CheckIndex,
-		Mode:       entry.Mode,
-		Result:     "pass",
-	}
-	switch {
-	case outcome.Err != nil:
-		verdict.Result = "error"
+	verdict, hard := compiler.Judge(entry, outcome)
+	switch verdict.Result {
+	case "error":
 		fprintf(stdout, "%s: checks[%d] (%s): error: %s\n", entry.Slug, entry.CheckIndex, entry.Mode, outcome.Err)
-		return verdict, true
-	case len(outcome.Violations) > 0 && outcome.Waived:
-		verdict.Result = "waived"
-		verdict.Violations = len(outcome.Violations)
-		fprintf(stdout, "%s: checks[%d] (%s): waived\n", entry.Slug, entry.CheckIndex, entry.Mode)
-		return verdict, false
-	case len(outcome.Violations) > 0:
-		covered := 0
-		for _, violation := range outcome.Violations {
-			if violation.Baselined {
-				covered++
-			}
+	case "waived":
+		if outcome.Waived {
+			fprintf(stdout, "%s: checks[%d] (%s): waived\n", entry.Slug, entry.CheckIndex, entry.Mode)
+		} else {
+			fprintf(stdout, "%s: checks[%d] (%s): waived (baseline: %d)\n", entry.Slug, entry.CheckIndex, entry.Mode, verdict.Violations)
 		}
-		if covered == len(outcome.Violations) {
-			verdict.Result = "waived"
-			verdict.Violations = covered
-			fprintf(stdout, "%s: checks[%d] (%s): waived (baseline: %d)\n", entry.Slug, entry.CheckIndex, entry.Mode, covered)
-			return verdict, false
-		}
-		verdict.Result = "fail"
-		verdict.Violations = len(outcome.Violations) - covered
+	case "fail":
 		for _, violation := range outcome.Violations {
 			if !violation.Baselined {
 				fprintf(stdout, "%s: checks[%d] (%s): %s\n", entry.Slug, entry.CheckIndex, entry.Mode, violationLine(violation))
 			}
 		}
-		if covered > 0 {
+		if covered := outcome.Baselined(); covered > 0 {
 			fprintf(stdout, "%s: checks[%d] (%s): baselined: %d\n", entry.Slug, entry.CheckIndex, entry.Mode, covered)
 		}
-		return verdict, entry.Mode == "block"
 	default:
 		fprintf(stdout, "%s: checks[%d] (%s): pass\n", entry.Slug, entry.CheckIndex, entry.Mode)
-		return verdict, false
 	}
+	return verdict, hard
 }
 
 func violationLine(violation compiler.Violation) string {
