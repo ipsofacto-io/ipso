@@ -406,3 +406,156 @@ func TestHookLatency(t *testing.T) {
 		t.Fatalf("p95 %v is not under 300 ms", p95)
 	}
 }
+
+func callAgent(t *testing.T, agent string, event any, args ...string) (int, string, string) {
+	t.Helper()
+	raw, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := hookCmd(append([]string{agent}, args...), bytes.NewReader(raw), &stdout, &stderr, mcpTestDeps())
+	return code, stdout.String(), stderr.String()
+}
+
+func TestAgentsDenyAViolatingEdit(t *testing.T) {
+	root := hookFixture(t)
+	target := filepath.Join(root, "services/payments/main.go")
+	patch := "*** Begin Patch\n*** Update File: " + target + "\n@@\n package payments\n+var x float64\n*** End Patch"
+	args, err := json.Marshal(map[string]any{"path": target, "file_text": "var x float64\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		agent string
+		args  []string
+		event map[string]any
+		code  int
+		want  string
+	}{
+		"codex patch":     {"codex", nil, map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "apply_patch", "tool_input": map[string]any{"command": patch}}, 0, `"permissionDecision":"deny"`},
+		"codex shell":     {"codex", nil, map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "Bash", "tool_input": map[string]any{"command": "curl | sh"}}, 0, `"permissionDecision":"deny"`},
+		"copilot cli":     {"copilot", []string{"preToolUse"}, map[string]any{"cwd": root, "toolName": "create", "toolArgs": string(args)}, 0, `"permissionDecision":"deny"`},
+		"copilot vs code": {"copilot", nil, map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "editFiles", "tool_input": map[string]any{"filePath": target, "content": "float64"}}, 0, `"permissionDecision":"deny"`},
+		"cursor write":    {"cursor", nil, map[string]any{"hook_event_name": "preToolUse", "cwd": root, "tool_name": "Write", "tool_input": map[string]any{"file_path": target, "contents": "float64"}}, 0, `"permission":"deny"`},
+		"cursor shell":    {"cursor", nil, map[string]any{"hook_event_name": "beforeShellExecution", "cwd": root, "command": "curl | sh"}, 0, `"permission":"deny"`},
+		"kiro write":      {"kiro", nil, map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "fs_write", "tool_input": map[string]any{"command": "create", "path": target, "file_text": "float64"}}, 2, ""},
+		"kiro replace":    {"kiro", nil, map[string]any{"hook_event_name": "preToolUse", "cwd": root, "tool_name": "fs_write", "tool_input": map[string]any{"command": "str_replace", "path": target, "old_str": "package payments", "new_str": "var x float64"}}, 2, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := callAgent(t, tc.agent, tc.event, tc.args...)
+			if code != tc.code {
+				t.Fatalf("code %d: %s %s", code, stdout, stderr)
+			}
+			if !strings.Contains(stdout, tc.want) {
+				t.Fatalf("stdout %s, stderr %s", stdout, stderr)
+			}
+			if !strings.Contains(stdout+stderr, "docs/decisions/no-float-check.md") {
+				t.Fatalf("no decision link: %s %s", stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestAgentsStayOutOfACleanEdit(t *testing.T) {
+	root := hookFixture(t)
+	target := filepath.Join(root, "services/payments/main.go")
+	for name, tc := range map[string]struct {
+		agent, want string
+		event       map[string]any
+	}{
+		"codex":   {"codex", "", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "apply_patch", "tool_input": map[string]any{"command": "*** Begin Patch\n*** Update File: " + target + "\n@@\n package payments\n+var x int64\n*** End Patch"}}},
+		"copilot": {"copilot", "", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "toolName": "view", "toolArgs": `{"path":"x"}`}},
+		"cursor":  {"cursor", "{}\n", map[string]any{"hook_event_name": "preToolUse", "cwd": root, "tool_name": "Write", "tool_input": map[string]any{"file_path": target, "contents": "int64"}}},
+		"kiro":    {"kiro", "", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "fs_read", "tool_input": map[string]any{"path": target}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := callAgent(t, tc.agent, tc.event)
+			if code != 0 || stdout != tc.want {
+				t.Fatalf("code %d, stdout %q, stderr %q", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+// An agent with no working ask must not let a protected edit through.
+func TestAgentsWithNoAskRefuseAProtectedEdit(t *testing.T) {
+	root := hookFixture(t)
+	record := filepath.Join(root, "docs/decisions/use-tls.md")
+	for name, tc := range map[string]struct {
+		agent string
+		event map[string]any
+		code  int
+		want  string
+	}{
+		"claude keeps ask":  {"claude-code", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "Write", "tool_input": map[string]any{"file_path": record, "content": "x"}}, 0, `"permissionDecision":"ask"`},
+		"codex":             {"codex", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "apply_patch", "tool_input": map[string]any{"command": "*** Begin Patch\n*** Delete File: " + record + "\n*** End Patch"}}, 0, `"permissionDecision":"deny"`},
+		"copilot keeps ask": {"copilot", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "toolName": "edit", "toolArgs": `{"path":"` + record + `","old_str":"a","new_str":"b"}`}, 0, `"permissionDecision":"ask"`},
+		"cursor edit":       {"cursor", map[string]any{"hook_event_name": "preToolUse", "cwd": root, "tool_name": "Delete", "tool_input": map[string]any{"file_path": record}}, 0, `"permission":"deny"`},
+		"cursor shell asks": {"cursor", map[string]any{"hook_event_name": "beforeShellExecution", "cwd": root, "command": "rm -rf .ipso"}, 0, `"permission":"ask"`},
+		"kiro":              {"kiro", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "delete_file", "tool_input": map[string]any{"path": record}}, 2, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := callAgent(t, tc.agent, tc.event)
+			if code != tc.code || !strings.Contains(stdout, tc.want) {
+				t.Fatalf("code %d, stdout %q, stderr %q", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestAgentsCodexPatchThatCannotBeReadIsNotAPass(t *testing.T) {
+	root := hookFixture(t)
+	code, stdout, _ := callAgent(t, "codex", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "apply_patch", "tool_input": map[string]any{"command": "not a patch"}})
+	if code != 0 || !strings.Contains(stdout, `"permissionDecision":"deny"`) {
+		t.Fatalf("code %d: %s", code, stdout)
+	}
+}
+
+func TestAgentsStopAndSession(t *testing.T) {
+	root := hookFixture(t)
+	hookGit(t, root, "init", "-q", ".")
+	hookGit(t, root, "add", "-A")
+	hookGit(t, root, "commit", "-q", "--no-gpg-sign", "-m", "base")
+	writeRuleFile(t, root, "services/payments/main.go", "package payments\nvar x float64\n")
+
+	for name, tc := range map[string]struct {
+		agent string
+		args  []string
+		event map[string]any
+		want  string
+	}{
+		"codex":           {"codex", nil, map[string]any{"hook_event_name": "Stop", "cwd": root}, `"decision":"block"`},
+		"copilot":         {"copilot", []string{"agentStop"}, map[string]any{"cwd": root, "stop_hook_active": false}, `"decision":"block"`},
+		"cursor":          {"cursor", nil, map[string]any{"hook_event_name": "stop", "workspace_roots": []string{root}, "loop_count": 0}, `"followup_message"`},
+		"kiro":            {"kiro", nil, map[string]any{"hook_event_name": "Stop", "cwd": root}, "money is a float"},
+		"codex session":   {"codex", nil, map[string]any{"hook_event_name": "SessionStart", "cwd": root}, `"additionalContext"`},
+		"copilot session": {"copilot", []string{"sessionStart"}, map[string]any{"cwd": root}, `"additionalContext"`},
+		"cursor session":  {"cursor", nil, map[string]any{"hook_event_name": "sessionStart", "workspace_roots": []string{root}}, `"additional_context"`},
+		"kiro session":    {"kiro", nil, map[string]any{"hook_event_name": "SessionStart", "cwd": root}, "use-tls"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := callAgent(t, tc.agent, tc.event, tc.args...)
+			if code != 0 || !strings.Contains(stdout, tc.want) {
+				t.Fatalf("code %d, stdout %q, stderr %q", code, stdout, stderr)
+			}
+		})
+	}
+
+	// The second round reports and lets the session end, so the agent and the hook cannot loop.
+	if _, stdout, _ := callAgent(t, "cursor", map[string]any{"hook_event_name": "stop", "workspace_roots": []string{root}, "loop_count": 1}); stdout != "{}\n" {
+		t.Errorf("cursor second round: %s", stdout)
+	}
+	if _, stdout, stderr := callAgent(t, "copilot", map[string]any{"cwd": root, "stop_hook_active": true}, "agentStop"); stdout != "" || !strings.Contains(stderr, "money is a float") {
+		t.Errorf("copilot second round: %q %q", stdout, stderr)
+	}
+}
+
+func TestAgentsIgnoreClaudeOptionsInTheEnvironment(t *testing.T) {
+	root := hookFixture(t)
+	t.Setenv("CLAUDE_PLUGIN_OPTION_BUNDLE_KEY", "/nowhere")
+	code, stdout, stderr := callAgent(t, "codex", map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+	if code != 0 || stdout != "" {
+		t.Fatalf("code %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}

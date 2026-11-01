@@ -128,3 +128,63 @@ func TestFromDiffRefusesASymlinkOutOfTheRepository(t *testing.T) {
 		t.Fatal("a link out of the repository was read")
 	}
 }
+
+func TestFromCodexPatch(t *testing.T) {
+	read := func(name string) string {
+		if name == "a.go" {
+			return "one\ntwo\nthree\nfour\n"
+		}
+		return ""
+	}
+	got, err := FromCodexPatch(read, `*** Begin Patch
+*** Update File: a.go
+@@
+ one
+-two
++TWO
+@@ three
+-four
++FOUR
+*** Add File: new/b.go
++hello
++world
+*** Update File: a.go
+*** Move to: moved.go
+@@
+ one
+*** Delete File: gone.go
+*** End Patch`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].Path != "a.go" || got[0].Content != "one\nTWO\nthree\nFOUR\n" || got[0].Added != "TWO\nFOUR" {
+		t.Errorf("update: %+v", got[0])
+	}
+	if got[1].Path != "new/b.go" || got[1].Content != "hello\nworld\n" {
+		t.Errorf("add: %+v", got[1])
+	}
+	if got[2].Tool != "delete" || got[2].Path != "a.go" || got[3].Path != "moved.go" {
+		t.Errorf("move: %+v %+v", got[2], got[3])
+	}
+	if got[4].Tool != "delete" || got[4].Path != "gone.go" {
+		t.Errorf("delete: %+v", got[4])
+	}
+}
+
+func TestFromCodexPatchRefuses(t *testing.T) {
+	read := func(string) string { return "one\n" }
+	for name, tc := range map[string]struct{ body, want string }{
+		"not a patch": {"rm -rf /", "not an apply_patch"},
+		"context":     {"*** Begin Patch\n*** Update File: a\n@@\n-other\n+x\n*** End Patch", "does not match"},
+		"bad line":    {"*** Begin Patch\n*** Update File: a\n@@\nnope\n*** End Patch", "starts with"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := FromCodexPatch(read, tc.body); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err %v", err)
+			}
+		})
+	}
+}

@@ -148,7 +148,7 @@ usage:
   ipso render kustomize <dir> --out <dir>
   ipso rules generate|check
   ipso mcp
-  ipso hook claude-code [--bundle dir --digest sha256:hex --key public.pem]
+  ipso hook claude-code|codex|copilot|cursor|kiro [event] [--bundle dir --digest sha256:hex --key public.pem]
   ipso compile`
 
 func initCmd(root string, stdout, stderr io.Writer) int {
