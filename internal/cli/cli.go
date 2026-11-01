@@ -97,6 +97,8 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		return rulesCmd(root, args[1:], stdout, stderr, d)
 	case "mcp":
 		return mcpCmd(root, args[1:], os.Stdin, stdout, stderr, d)
+	case "hook":
+		return hookCmd(args[1:], os.Stdin, stdout, stderr, d)
 	case "-h", "--help", "help", "version", "--version", "-v":
 		fprintln(stdout, helpText())
 		return 0
@@ -146,6 +148,7 @@ usage:
   ipso render kustomize <dir> --out <dir>
   ipso rules generate|check
   ipso mcp
+  ipso hook claude-code [--bundle dir --digest sha256:hex --key public.pem]
   ipso compile`
 
 func initCmd(root string, stdout, stderr io.Writer) int {
