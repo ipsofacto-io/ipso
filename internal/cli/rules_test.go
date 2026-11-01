@@ -20,7 +20,7 @@ func ruleRecord(slug, title, scope, tags, statement string) string {
 	_, _ = id.Write([]byte(slug))
 	return fmt.Sprintf(`---
 edr: 1
-id: 01M6DAJ5Z5X76Y1062C4H9KR%02d
+id: 01M6DAJ5Z5X76Y1062C4%06d
 slug: %s
 title: %q
 status: accepted
@@ -61,7 +61,7 @@ None.
 ## Verification
 
 None.
-`, id.Sum32()%100, slug, title, scope, tags, title, statement)
+`, id.Sum32()%1000000, slug, title, scope, tags, title, statement)
 }
 
 func writeRuleFile(t *testing.T, root, rel, content string) {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"slices"
 	"sort"
 	"time"
 
@@ -27,6 +28,7 @@ type Entry struct {
 	ValidFrom       string             `json:"valid_from"`
 	ValidTo         *string            `json:"valid_to"`
 	Env             []string           `json:"env"`
+	Paths           []string           `json:"paths,omitempty"`
 	Waivers         []ManifestWaiver   `json:"waivers"`
 	Compiler        string             `json:"compiler"`
 	CompilerVersion string             `json:"compiler_version"`
@@ -92,6 +94,7 @@ func Assemble(engine Compiler, in Input, artifacts []Artifact) (Entry, []Artifac
 		ValidFrom:       in.Record.ValidFrom.Format(dateLayout),
 		ValidTo:         dateText(in.Record.ValidTo),
 		Env:             envList(in.Record),
+		Paths:           pathList(in.Record),
 		Waivers:         waiverList(in.Record),
 		Compiler:        engine.Engine(),
 		CompilerVersion: engine.Version(),
@@ -129,6 +132,24 @@ func envList(rec edr.Record) []string {
 	}
 	sort.Strings(envs)
 	return envs
+}
+
+// pathList returns the sorted globs the record applies to.
+// nil means the whole repository, because one scope item names none.
+func pathList(rec edr.Record) []string {
+	var paths []string
+	for _, item := range rec.Scope {
+		if len(item.Paths) == 0 {
+			return nil
+		}
+		for _, glob := range item.Paths {
+			if !slices.Contains(paths, glob) {
+				paths = append(paths, glob)
+			}
+		}
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 func waiverList(rec edr.Record) []ManifestWaiver {

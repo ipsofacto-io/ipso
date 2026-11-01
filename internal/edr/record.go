@@ -3,6 +3,9 @@ package edr
 import (
 	"fmt"
 	"math"
+	"path"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -19,6 +22,8 @@ type Check struct {
 // An empty Env means the item applies in every environment.
 // An empty Paths means the item applies to the whole repository.
 type ScopeItem struct {
+	Org   string
+	Repo  string
 	Env   []string
 	Paths []string
 }
@@ -149,6 +154,45 @@ func (r Record) InForce(now time.Time) bool {
 	return true
 }
 
+// Applies reports whether one scope item covers the selection. An omitted field matches every
+// scope, which widens the answer, the rule of ADR-0051. repo is owner/name, compared without case.
+func (r Record) Applies(repo string, paths []string, env string) bool {
+	for _, item := range r.Scope {
+		if item.covers(repo, paths, env) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s ScopeItem) covers(repo string, paths []string, env string) bool {
+	if repo != "" {
+		owner, _, _ := strings.Cut(repo, "/")
+		if s.Org != "" && !strings.EqualFold(s.Org, owner) {
+			return false
+		}
+		if s.Repo != "" {
+			if matched, err := path.Match(strings.ToLower(s.Repo), strings.ToLower(repo)); err != nil || !matched {
+				return false
+			}
+		}
+	}
+	if env != "" && len(s.Env) > 0 && !slices.Contains(s.Env, env) {
+		return false
+	}
+	if len(paths) == 0 || len(s.Paths) == 0 {
+		return true
+	}
+	for _, name := range paths {
+		for _, glob := range s.Paths {
+			if MatchPath(glob, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // EffectiveMode returns the check mode, or the mode implied by criticality
 // when the check omits one: blocking to block, warning to warn, advisory to advise.
 func (c Check) EffectiveMode(criticality string) (string, error) {
@@ -211,7 +255,9 @@ func scopeFrom(raw any) ([]ScopeItem, error) {
 		if err != nil {
 			return nil, fmt.Errorf("scope[%d]: paths: %w", i, err)
 		}
-		scope = append(scope, ScopeItem{Env: envs, Paths: paths})
+		org, _ := mapping["org"].(string)
+		repo, _ := mapping["repo"].(string)
+		scope = append(scope, ScopeItem{Org: org, Repo: repo, Env: envs, Paths: paths})
 	}
 	return scope, nil
 }

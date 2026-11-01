@@ -95,6 +95,8 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		return baselineCmd(root, args[1:], stdout, stderr, d)
 	case "rules":
 		return rulesCmd(root, args[1:], stdout, stderr, d)
+	case "mcp":
+		return mcpCmd(root, args[1:], os.Stdin, stdout, stderr, d)
 	case "-h", "--help", "help", "version", "--version", "-v":
 		fprintln(stdout, helpText())
 		return 0
@@ -143,6 +145,7 @@ usage:
   ipso render helm <chart-dir> --out <dir> [--values file]... [--release name] [--namespace name] [--kube-version version]
   ipso render kustomize <dir> --out <dir>
   ipso rules generate|check
+  ipso mcp
   ipso compile`
 
 func initCmd(root string, stdout, stderr io.Writer) int {

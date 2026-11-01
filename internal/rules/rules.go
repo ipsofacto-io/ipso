@@ -140,7 +140,7 @@ func Plan(repo *os.Root, decisions []Decision, decisionGlobs []string) ([]Change
 // so an interrupted run cannot truncate a file that also holds hand-written text.
 func Apply(repo *os.Root, changes []Change) error {
 	for _, change := range changes {
-		if err := refuseSymlinks(repo, change.Path); err != nil {
+		if err := RefuseSymlinks(repo, change.Path); err != nil {
 			return err
 		}
 		if change.Remove {
@@ -212,7 +212,7 @@ func sorted(decisions []Decision) ([]Decision, error) {
 			return nil, fmt.Errorf("%s and %s share slug %s", ordered[i-1].Record, item.Record, item.Slug)
 		}
 		for _, glob := range item.Paths {
-			if err := checkGlob(glob); err != nil {
+			if err := CheckGlob(glob); err != nil {
 				return nil, fmt.Errorf("%s: %w", item.Record, err)
 			}
 		}
@@ -220,7 +220,8 @@ func sorted(decisions []Decision) ([]Decision, error) {
 	return ordered, nil
 }
 
-func checkGlob(glob string) error {
+// CheckGlob reports whether every generated format can carry a path glob.
+func CheckGlob(glob string) error {
 	if !globChars.MatchString(glob) {
 		return fmt.Errorf("path %q has a character the generated files cannot carry", glob)
 	}
@@ -340,7 +341,7 @@ func renderDecision(item Decision, globs []string, heading string) string {
 	} else {
 		fmt.Fprintf(&out, "%s %s (`%s`)\n\n", heading, oneLine(item.Title), item.Slug)
 	}
-	fields := []string{"Criticality: " + oneLine(item.Criticality), "State: " + brandState(item.Status)}
+	fields := []string{"Criticality: " + oneLine(item.Criticality), "State: " + BrandState(item.Status)}
 	if len(globs) > 0 {
 		quoted := make([]string, len(globs))
 		for i, glob := range globs {
@@ -357,13 +358,13 @@ func renderDecision(item Decision, globs []string, heading string) string {
 		out.WriteString("This decision is marked sensitive. Read the record.\n")
 		return out.String()
 	}
-	out.WriteString(statement(item) + "\n")
+	out.WriteString(Statement(item.Statement) + "\n")
 	return out.String()
 }
 
-// statement returns the decision text, bounded, with no line that could close a block.
-func statement(item Decision) string {
-	text := strings.ReplaceAll(strings.TrimSpace(item.Statement), markerPrefix, "&lt;!-- ipso:rules:")
+// Statement returns the decision text, bounded, with no line that could close a block.
+func Statement(raw string) string {
+	text := strings.ReplaceAll(strings.TrimSpace(raw), markerPrefix, "&lt;!-- ipso:rules:")
 	runes := []rune(text)
 	if len(runes) > maxStatement {
 		return string(runes[:maxStatement]) + "\n\nThis text is cut. Read the record for the rest."
@@ -371,8 +372,8 @@ func statement(item Decision) string {
 	return text
 }
 
-// brandState is the word section 2.2 shows for an internal state.
-func brandState(status string) string {
+// BrandState is the word section 2.2 shows for an internal state.
+func BrandState(status string) string {
 	switch status {
 	case "verified":
 		return "Verified"
@@ -515,7 +516,7 @@ func hasLine(data []byte, line string) bool {
 
 // planBlock returns the change that puts block into the file, or takes it out when block is empty.
 func planBlock(repo *os.Root, name, block string) (*Change, error) {
-	if err := refuseSymlinks(repo, name); err != nil {
+	if err := RefuseSymlinks(repo, name); err != nil {
 		return nil, err
 	}
 	current, err := repo.ReadFile(name)
@@ -588,7 +589,7 @@ func joinBlock(before, block, after string) string {
 }
 
 func planOwned(repo *os.Root, name string, data []byte) (*Change, error) {
-	if err := refuseSymlinks(repo, name); err != nil {
+	if err := RefuseSymlinks(repo, name); err != nil {
 		return nil, err
 	}
 	current, err := repo.ReadFile(name)
@@ -607,8 +608,8 @@ func planOwned(repo *os.Root, name string, data []byte) (*Change, error) {
 	return &Change{Path: name, Data: data}, nil
 }
 
-// refuseSymlinks stops a write from following a link to another file in the repository.
-func refuseSymlinks(repo *os.Root, name string) error {
+// RefuseSymlinks stops a write from following a link to another file in the repository.
+func RefuseSymlinks(repo *os.Root, name string) error {
 	current := ""
 	for _, segment := range strings.Split(name, "/") {
 		current = path.Join(current, segment)
