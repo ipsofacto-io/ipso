@@ -218,7 +218,12 @@ func (e Entry) Applies(env string, now time.Time) bool {
 
 // Selected reports whether the entry is an in-force OPA check for a Terraform plan.
 func (e Entry) Selected(env string, now time.Time) bool {
-	if e.Engine != opaEngine || e.Target != planTarget {
+	return e.SelectedFor(planTarget, env, now)
+}
+
+// SelectedFor reports whether the entry is an in-force OPA check for target.
+func (e Entry) SelectedFor(target, env string, now time.Time) bool {
+	if e.Engine != opaEngine || e.Target != target {
 		return false
 	}
 	return e.Applies(env, now)
@@ -470,12 +475,31 @@ type CheckovReport struct {
 	Verdicts       []Verdict `json:"verdicts"`
 }
 
+// AdapterReport is the verdict report for the checks that read another tool's plan or template.
+// It carries the hash of the input as read, never resource names, values, or messages.
+type AdapterReport struct {
+	ReportVersion int       `json:"report_version"`
+	IpsoVersion   string    `json:"ipso_version"`
+	EvaluatedAt   time.Time `json:"evaluated_at"`
+	Env           string    `json:"env"`
+	Adapter       string    `json:"adapter"`
+	InputSHA256   string    `json:"input_sha256"`
+	BuildSHA256   string    `json:"build_sha256"`
+	Verdicts      []Verdict `json:"verdicts"`
+}
+
 // ReportVersion is the report contract version.
 const ReportVersion = 1
 
 // MarshalReport encodes a plan report as deterministic JSON.
 // evaluated_at is UTC with a trailing Z and no fractional seconds.
 func MarshalReport(report PlanReport) ([]byte, error) {
+	report.EvaluatedAt, report.Verdicts = finishReport(report.EvaluatedAt, report.Verdicts)
+	return encodeReport(report)
+}
+
+// MarshalAdapterReport encodes an adapter report as deterministic JSON.
+func MarshalAdapterReport(report AdapterReport) ([]byte, error) {
 	report.EvaluatedAt, report.Verdicts = finishReport(report.EvaluatedAt, report.Verdicts)
 	return encodeReport(report)
 }

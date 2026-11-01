@@ -119,6 +119,9 @@ usage:
   ipso check plan <plan.json|-> [--env name] [--input name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]
   ipso check ci <evidence.json|-> --sha <sha> [--env name] [--report file] [--sarif file]
   ipso check checkov <results.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check pulumi <preview.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check cloudformation <template|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check arm <template.json|-> [--env name] [--input name] [--report file] [--sarif file]
   ipso check depcruise <path>... [--env name] [--input name] [--report file] [--sarif file]
   ipso check semgrep <path>... [--env name] [--input name] [--report file] [--sarif file]
   ipso check archunit <classes-dir>... --jars <dir> [--env name] [--input name] [--report file] [--sarif file]
@@ -161,6 +164,12 @@ func checkCmd(root string, args []string, stdout, stderr io.Writer, d deps) int 
 		return ciCmd(root, args[1:], stdout, stderr, d)
 	case "checkov":
 		return checkovCmd(root, args[1:], stdout, stderr, d)
+	case "pulumi":
+		return adapterCmd(root, args[1:], pulumiCheck, stdout, stderr, d)
+	case "cloudformation":
+		return adapterCmd(root, args[1:], cloudformationCheck, stdout, stderr, d)
+	case "arm":
+		return adapterCmd(root, args[1:], armCheck, stdout, stderr, d)
 	case "depcruise":
 		return depcruiseCmd(root, args[1:], stdout, stderr, d)
 	case "semgrep":
@@ -232,7 +241,7 @@ const (
 	kyvernoUsage      = "usage: ipso check kyverno <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	gatekeeperUsage   = "usage: ipso check gatekeeper <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	eslintUsage       = "usage: ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]"
-	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage
+	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + pulumiUsage + "\n" + cloudformationUsage + "\n" + armUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage
 )
 
 func planCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
