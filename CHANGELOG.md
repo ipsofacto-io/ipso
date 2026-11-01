@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/ipsofacto-io/ipso/compare/v0.3.0...v0.4.0) (2026-11-01)
+
+
+### Features
+
+* **cli:** answer Claude Code hooks from local checks ([#51](https://github.com/ipsofacto-io/ipso/issues/51)) ([770d250](https://github.com/ipsofacto-io/ipso/commit/770d250c423ef1be14d2784685567d860c03332e))
+* **cli:** answer Codex, Copilot, Cursor, and Kiro hooks ([#52](https://github.com/ipsofacto-io/ipso/issues/52)) ([2c3e979](https://github.com/ipsofacto-io/ipso/commit/2c3e9791857c2294edf0964eeeb7a5543529cff9))
+* **cli:** check Pulumi, CloudFormation, CDK, and ARM output ([#47](https://github.com/ipsofacto-io/ipso/issues/47)) ([b5776b6](https://github.com/ipsofacto-io/ipso/commit/b5776b6694ab69e187d96e245763597784750273))
+* **cli:** generate agent rules files from decisions ([#49](https://github.com/ipsofacto-io/ipso/issues/49)) ([553b9c9](https://github.com/ipsofacto-io/ipso/commit/553b9c9b1c5372d2753500f588cfa5aab043cc56))
+* **cli:** render Helm charts and Kustomize directories offline ([#44](https://github.com/ipsofacto-io/ipso/issues/44)) ([d6e7dd3](https://github.com/ipsofacto-io/ipso/commit/d6e7dd31c1fb12c18ea78098fcccb28b2469a787))
+* **cli:** serve decisions over a local MCP server ([#50](https://github.com/ipsofacto-io/ipso/issues/50)) ([c7ff8ad](https://github.com/ipsofacto-io/ipso/commit/c7ff8ad68d4cabdedc2afc41437524541e637644))
+* expose plan evaluation to other modules ([#45](https://github.com/ipsofacto-io/ipso/issues/45)) ([5b24409](https://github.com/ipsofacto-io/ipso/commit/5b24409be7327ea8b226a8350f1dddbff5aca72b))
+
 ## [0.3.0](https://github.com/ipsofacto-io/ipso/compare/v0.2.0...v0.3.0) (2026-11-01)
 
 
