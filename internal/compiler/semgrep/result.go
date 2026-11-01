@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strconv"
 	"time"
 
@@ -29,9 +30,12 @@ const (
 
 // Finding is one Semgrep result.
 type Finding struct {
-	Rule string
-	Path string
-	Line int
+	Rule      string
+	Path      string
+	Line      int
+	Column    int
+	EndLine   int
+	EndColumn int
 }
 
 // Result is the part of a scan report ipso evaluates.
@@ -60,7 +64,12 @@ type scanResult struct {
 	Path    string `json:"path"`
 	Start   struct {
 		Line int `json:"line"`
+		Col  int `json:"col"`
 	} `json:"start"`
+	End struct {
+		Line int `json:"line"`
+		Col  int `json:"col"`
+	} `json:"end"`
 }
 
 // ParseResult reads a Semgrep JSON report.
@@ -88,7 +97,7 @@ func ParseResult(raw []byte, toolVersion string) (Result, error) {
 		if item.CheckID == "" || item.Path == "" || item.Start.Line < 1 {
 			return Result{}, &compiler.Error{Code: CodeOutput, Err: errors.New("result is missing a rule, a path, or a line")}
 		}
-		findings = append(findings, Finding{Rule: item.CheckID, Path: item.Path, Line: item.Start.Line})
+		findings = append(findings, Finding{Rule: item.CheckID, Path: item.Path, Line: item.Start.Line, Column: item.Start.Col, EndLine: item.End.Line, EndColumn: item.End.Col})
 	}
 	return Result{Version: *doc.Version, Scanned: len(doc.Paths.Scanned), Findings: findings}, nil
 }
@@ -108,9 +117,13 @@ func EvalCheck(entry compiler.Entry, artifacts map[string][]byte, toolVersion st
 	}
 	var violations []compiler.Violation
 	for _, item := range result.Findings {
-		violations = append(violations, compiler.Violation{Message: item.message()})
+		violations = append(violations, compiler.Violation{Message: item.message(), Position: item.position()})
 	}
 	return compiler.Cover(entry, compiler.Outcome{Violations: violations}, now)
+}
+
+func (f Finding) position() *compiler.Position {
+	return &compiler.Position{Path: path.Clean(f.Path), StartLine: f.Line, StartColumn: f.Column, EndLine: f.EndLine, EndColumn: f.EndColumn}
 }
 
 func (f Finding) message() string {

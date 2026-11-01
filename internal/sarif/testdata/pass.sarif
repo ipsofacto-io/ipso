@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ipso",
+          "version": "1.2.3",
+          "informationUri": "https://github.com/ipsofacto-io/ipso",
+          "rules": []
+        }
+      },
+      "automationDetails": {
+        "id": "ipso/semgrep/"
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "results": []
+    }
+  ]
+}

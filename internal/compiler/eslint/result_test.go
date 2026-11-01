@@ -24,9 +24,9 @@ func TestParseResultsReadsRealCaptures(t *testing.T) {
 		want  []Finding
 	}{
 		{"clean", "clean", 0, ruleSet(floatingPromises), "block", nil},
-		{"an error in block mode", "block", 1, ruleSet(floatingPromises), "block", []Finding{{Rule: floatingPromises, Path: "services/float.ts", Line: 3, Column: 3}}},
-		{"a warning in warn mode", "warn", 0, ruleSet(floatingPromises), "warn", []Finding{{Rule: floatingPromises, Path: "services/float.ts", Line: 3, Column: 3}}},
-		{"a warning in advise mode", "warn", 0, ruleSet(floatingPromises), "advise", []Finding{{Rule: floatingPromises, Path: "services/float.ts", Line: 3, Column: 3}}},
+		{"an error in block mode", "block", 1, ruleSet(floatingPromises), "block", []Finding{{Rule: floatingPromises, Path: "services/float.ts", Line: 3, Column: 3, EndLine: 3, EndColumn: 21}}},
+		{"a warning in warn mode", "warn", 0, ruleSet(floatingPromises), "warn", []Finding{{Rule: floatingPromises, Path: "services/float.ts", Line: 3, Column: 3, EndLine: 3, EndColumn: 21}}},
+		{"a warning in advise mode", "warn", 0, ruleSet(floatingPromises), "advise", []Finding{{Rule: floatingPromises, Path: "services/float.ts", Line: 3, Column: 3, EndLine: 3, EndColumn: 21}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -94,6 +94,9 @@ func Materialize(manifest []byte, open func(rel string) ([]byte, error)) (Build,
 		if err := entry.dates(); err != nil {
 			return Build{}, &Error{Code: CodeBuildManifest, Err: err}
 		}
+		if entry.Path != "" && !ValidRepoPath(entry.Path) {
+			return Build{}, &Error{Code: CodeBuildManifest, Err: fmt.Errorf("decision %s path is not inside the repository", entry.DecisionID)}
+		}
 		got := make(map[string][]byte, len(entry.Artifacts))
 		for _, artifact := range entry.Artifacts {
 			rel, err := ArtifactRel(entry.DecisionID, entry.CheckIndex, artifact.Name)
@@ -219,9 +222,26 @@ func (e Entry) Selected(env string, now time.Time) bool {
 }
 
 // Violation is one denial from a check. The terminal prints it. The report stores only the count.
+// Position is set by engines that report a place in a repository file, and SARIF is its only reader.
 type Violation struct {
-	Message string
-	Address string
+	Message  string
+	Address  string
+	Position *Position
+}
+
+// Position is a place in a repository file. Path is slash-separated and relative to the repository root.
+// Lines and columns start at 1. An end value of 0 means the engine did not report it.
+type Position struct {
+	Path        string
+	StartLine   int
+	StartColumn int
+	EndLine     int
+	EndColumn   int
+}
+
+// ValidRepoPath reports whether path is a clean slash-separated path inside the repository.
+func ValidRepoPath(path string) bool {
+	return path != "." && !strings.Contains(path, "\\") && fs.ValidPath(path)
 }
 
 // Outcome is the result of evaluating one check.

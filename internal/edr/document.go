@@ -36,6 +36,34 @@ func (d Document) Status() string {
 	return value
 }
 
+// ID returns the frontmatter id.
+func (d Document) ID() string {
+	value, _ := d.Front["id"].(string)
+	return value
+}
+
+// Source is one link the frontmatter names.
+type Source struct {
+	Type string
+	URL  string
+}
+
+// Sources returns the frontmatter sources that have a URL.
+func (d Document) Sources() []Source {
+	items, _ := d.Front["sources"].([]any)
+	var sources []Source
+	for _, item := range items {
+		fields, _ := item.(map[string]any)
+		url, _ := fields["url"].(string)
+		if url == "" {
+			continue
+		}
+		kind, _ := fields["type"].(string)
+		sources = append(sources, Source{Type: kind, URL: url})
+	}
+	return sources
+}
+
 // Parse splits a Markdown file into frontmatter and body.
 // Dates become YYYY-MM-DD strings so the JSON Schema can validate them.
 func Parse(text string) (Document, error) {

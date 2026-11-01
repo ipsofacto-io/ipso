@@ -41,10 +41,12 @@ const (
 type Finding struct {
 	Rule string
 	// Path is slash-separated and relative to the repository root.
-	Path    string
-	Line    int
-	Column  int
-	Message string
+	Path      string
+	Line      int
+	Column    int
+	EndLine   int
+	EndColumn int
+	Message   string
 }
 
 type fileResult struct {
@@ -57,12 +59,14 @@ type fileResult struct {
 }
 
 type message struct {
-	RuleID   *string `json:"ruleId"`
-	Severity *int    `json:"severity"`
-	Fatal    bool    `json:"fatal"`
-	Message  string  `json:"message"`
-	Line     *int    `json:"line"`
-	Column   *int    `json:"column"`
+	RuleID    *string `json:"ruleId"`
+	Severity  *int    `json:"severity"`
+	Fatal     bool    `json:"fatal"`
+	Message   string  `json:"message"`
+	Line      *int    `json:"line"`
+	Column    *int    `json:"column"`
+	EndLine   *int    `json:"endLine"`
+	EndColumn *int    `json:"endColumn"`
 }
 
 // ParseResults reads the standard output of one `eslint --format json` run for a check that enables
@@ -242,7 +246,11 @@ func checkMessage(item message, path string, rules map[string]struct{}, want int
 	if _, ok := rules[*item.RuleID]; !ok {
 		return Finding{}, errors.New("a message is not one of this check's rules")
 	}
-	return Finding{Rule: *item.RuleID, Path: path, Line: *item.Line, Column: *item.Column, Message: item.Message}, nil
+	finding := Finding{Rule: *item.RuleID, Path: path, Line: *item.Line, Column: *item.Column, Message: item.Message}
+	if item.EndLine != nil && item.EndColumn != nil {
+		finding.EndLine, finding.EndColumn = *item.EndLine, *item.EndColumn
+	}
+	return finding, nil
 }
 
 func outputError(reason string) error {
@@ -258,5 +266,6 @@ func incompleteError(f Finding) error {
 // The verdict report never carries it.
 func (f Finding) violation() compiler.Violation {
 	line := fmt.Sprintf("%s %s:%d:%d: %s", compiler.EscapeControls(f.Rule), compiler.EscapeControls(f.Path), f.Line, f.Column, compiler.EscapeControls(f.Message))
-	return compiler.Violation{Message: line}
+	position := &compiler.Position{Path: f.Path, StartLine: f.Line, StartColumn: f.Column, EndLine: f.EndLine, EndColumn: f.EndColumn}
+	return compiler.Violation{Message: line, Position: position}
 }
