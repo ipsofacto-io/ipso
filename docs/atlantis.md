@@ -2,7 +2,7 @@
 
 [Atlantis](https://www.runatlantis.io/) runs `terraform plan` and `terraform apply` from pull request comments. One server-side workflow adds `ipso check plan` to its plan stage, so a plan that breaks a blocking decision cannot be applied. ipso runs on the Atlantis server and calls no ipso service.
 
-[`ipsofacto-io/examples`](https://github.com/ipsofacto-io/examples/tree/main/atlantis) runs this workflow on a real Atlantis on every pull request, and you can run it on your machine with one command.
+[`ipsofacto-io/examples`](https://github.com/ipsofacto-io/examples/tree/main/atlantis) runs this workflow on a real Atlantis whenever the sample changes, and you can run it on your machine with one command.
 
 ## Install
 
@@ -52,6 +52,8 @@ workflows:
 Removing the plan file is the block. Atlantis keeps the file when a later step of the plan stage fails, and it finds plans to apply by looking for those files. Do not drop that line.
 
 A new commit or `atlantis plan` runs the whole stage again.
+
+With `--parallel-plan`, projects of one pull request share a clone, so their `ipso compile` runs replace the same `.ipso/build` while another plan reads it. That fails closed, as a build error on a compliant plan. Pin a signed bundle, as below, or plan one project at a time.
 
 To keep a pull request from merging on a failed plan, make the `atlantis/plan` status required on the default branch, and add `mergeable` to `apply_requirements`.
 
