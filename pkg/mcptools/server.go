@@ -143,7 +143,7 @@ func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
 	if raw, ok := params.Meta[metaProtocolVersion]; ok {
 		var version string
 		if err := json.Unmarshal(raw, &version); err != nil || !slices.Contains(SupportedVersions(), version) {
-			return nil, &rpcError{Code: codeUnsupportedVersion, Message: "unsupported protocol version", Data: map[string]any{"supported": SupportedVersions(), "requested": string(raw)}}
+			return nil, &rpcError{Code: codeUnsupportedVersion, Message: "unsupported protocol version", Data: map[string]any{"supported": SupportedVersions(), "requested": version}}
 		}
 		stateless = version == LatestVersion
 	}

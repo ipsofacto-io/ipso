@@ -110,6 +110,9 @@ func TestUnsupportedVersionNamesWhatIsSupported(t *testing.T) {
 	if failure["code"] != float64(codeUnsupportedVersion) || !strings.Contains(string(mustJSON(t, failure["data"])), LatestVersion) {
 		t.Fatalf("%v", failure)
 	}
+	if failure["data"].(map[string]any)["requested"] != "2099-01-01" {
+		t.Fatalf("requested holds the bare version: %v", failure["data"])
+	}
 }
 
 func mustJSON(t *testing.T, value any) []byte {
