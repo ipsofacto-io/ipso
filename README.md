@@ -41,6 +41,10 @@ ipso explain <slug>
 
 [`ipsofacto-io/ipso-action`](https://github.com/ipsofacto-io/ipso-action) runs one check in a job, uploads its SARIF file to code scanning, and keeps the evidence as an artifact. [docs/github-action.md](docs/github-action.md) has an example workflow.
 
+## Spacelift, env0, and Scalr
+
+A hook on the platform's worker runs `ipso check plan` against the run's own plan, and a non-zero exit stops the run. [docs/platforms.md](docs/platforms.md) has the hook for each platform and what still has to be validated on it.
+
 ## Secure use
 
 - `ipso check`, `ipso explain`, `ipso compile`, `ipso check plan`, `ipso check ci`, and `ipso check checkov` run offline. They read local files that match the config globs and do not call a network service. `ipso premise check` performs the public HTTPS GET from ADR-0053. It sends no Authorization header and no cookies, refuses an IP literal, a private address, and a redirect, and it does not edit the EDR.
