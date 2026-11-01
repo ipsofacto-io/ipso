@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ipsofacto-io/ipso/internal/baseline"
 	"github.com/ipsofacto-io/ipso/internal/bundle"
 	"github.com/ipsofacto-io/ipso/internal/compiler"
 	"github.com/ipsofacto-io/ipso/internal/compiler/archunit"
@@ -38,6 +39,8 @@ type deps struct {
 	now         func() time.Time
 	registry    compiler.Registry
 	probeClient premise.Client
+	// capture collects raw outcomes for ipso baseline. Set, it also stops the stamped baseline from applying.
+	capture *capturedChecks
 }
 
 // Run executes one CLI invocation. args excludes the program name.
@@ -86,6 +89,8 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		return bundleCmd(root, args[1:], stdout, stderr)
 	case "premise":
 		return premiseCmd(root, args[1:], stdout, stderr, d)
+	case "baseline":
+		return baselineCmd(root, args[1:], stdout, stderr, d)
 	case "-h", "--help", "help", "version", "--version", "-v":
 		fprintln(stdout, helpText())
 		return 0
@@ -111,19 +116,20 @@ const usage = `ipso reads and compiles engineering decision records in a reposit
 usage:
   ipso init
   ipso check
-  ipso check plan <plan.json|-> [--env name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]
+  ipso check plan <plan.json|-> [--env name] [--input name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]
   ipso check ci <evidence.json|-> --sha <sha> [--env name] [--report file] [--sarif file]
-  ipso check checkov <results.json|-> [--env name] [--report file] [--sarif file]
-  ipso check depcruise <path>... [--env name] [--report file] [--sarif file]
-  ipso check semgrep <path>... [--env name] [--report file] [--sarif file]
-  ipso check archunit <classes-dir>... --jars <dir> [--env name] [--report file] [--sarif file]
-  ipso check importlinter <source-dir>... [--env name] [--report file] [--sarif file]
-  ipso check kyverno <path>... [--env name] [--report file] [--sarif file]
-  ipso check gatekeeper <path>... [--env name] [--report file] [--sarif file]
-  ipso check eslint <path>... [--env name] [--report file] [--sarif file]
+  ipso check checkov <results.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check depcruise <path>... [--env name] [--input name] [--report file] [--sarif file]
+  ipso check semgrep <path>... [--env name] [--input name] [--report file] [--sarif file]
+  ipso check archunit <classes-dir>... --jars <dir> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check importlinter <source-dir>... [--env name] [--input name] [--report file] [--sarif file]
+  ipso check kyverno <path>... [--env name] [--input name] [--report file] [--sarif file]
+  ipso check gatekeeper <path>... [--env name] [--input name] [--report file] [--sarif file]
+  ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]
   ipso explain <slug>
   ipso import [path...]
   ipso premise check [--report file]
+  ipso baseline create|update <subcommand> <args>
   ipso bundle pack --layout dir
   ipso bundle sign --layout dir --key private.pem
   ipso bundle verify --layout dir --digest sha256:hex --key public.pem
@@ -216,16 +222,16 @@ func checkFiles(root string, stdout, stderr io.Writer) int {
 }
 
 const (
-	planUsage         = "usage: ipso check plan <plan.json|-> [--env name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]"
+	planUsage         = "usage: ipso check plan <plan.json|-> [--env name] [--input name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]"
 	ciUsage           = "usage: ipso check ci <evidence.json|-> --sha <sha> [--env name] [--report file] [--sarif file]"
-	checkovUsage      = "usage: ipso check checkov <results.json|-> [--env name] [--report file] [--sarif file]"
-	depcruiseUsage    = "usage: ipso check depcruise <path>... [--env name] [--report file] [--sarif file]"
-	semgrepUsage      = "usage: ipso check semgrep <path>... [--env name] [--report file] [--sarif file]"
-	archunitUsage     = "usage: ipso check archunit <classes-dir>... --jars <dir> [--env name] [--report file] [--sarif file]"
-	importlinterUsage = "usage: ipso check importlinter <source-dir>... [--env name] [--report file] [--sarif file]"
-	kyvernoUsage      = "usage: ipso check kyverno <path>... [--env name] [--report file] [--sarif file]"
-	gatekeeperUsage   = "usage: ipso check gatekeeper <path>... [--env name] [--report file] [--sarif file]"
-	eslintUsage       = "usage: ipso check eslint <path>... [--env name] [--report file] [--sarif file]"
+	checkovUsage      = "usage: ipso check checkov <results.json|-> [--env name] [--input name] [--report file] [--sarif file]"
+	depcruiseUsage    = "usage: ipso check depcruise <path>... [--env name] [--input name] [--report file] [--sarif file]"
+	semgrepUsage      = "usage: ipso check semgrep <path>... [--env name] [--input name] [--report file] [--sarif file]"
+	archunitUsage     = "usage: ipso check archunit <classes-dir>... --jars <dir> [--env name] [--input name] [--report file] [--sarif file]"
+	importlinterUsage = "usage: ipso check importlinter <source-dir>... [--env name] [--input name] [--report file] [--sarif file]"
+	kyvernoUsage      = "usage: ipso check kyverno <path>... [--env name] [--input name] [--report file] [--sarif file]"
+	gatekeeperUsage   = "usage: ipso check gatekeeper <path>... [--env name] [--input name] [--report file] [--sarif file]"
+	eslintUsage       = "usage: ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage
 )
 
@@ -274,7 +280,7 @@ func planCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 		PlanSHA256:    plan.SHA256(),
 		BuildSHA256:   build.SHA256(),
 	}
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Selected(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		return opa.EvalCheck(entry, artifacts, plan, now)
@@ -287,7 +293,7 @@ func planCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 	if selected == 0 {
 		fprintln(stdout, "no checks selected")
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "plan", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("plan", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -329,7 +335,7 @@ func ciCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 		return 1
 	}
 	now := d.now()
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Engine == "ci-binding" && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		return cibinding.EvalCheck(entry, artifacts, evidence, now)
@@ -351,7 +357,7 @@ func ciCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 		BuildSHA256:    build.SHA256(),
 		Verdicts:       verdicts,
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "ci", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("ci", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalCIReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -389,7 +395,7 @@ func checkovCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 		return 1
 	}
 	now := d.now()
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Engine == "checkov" && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		return checkov.EvalCheck(entry, artifacts, results, now)
@@ -410,7 +416,7 @@ func checkovCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 		BuildSHA256:    build.SHA256(),
 		Verdicts:       verdicts,
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "checkov", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("checkov", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalCheckovReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -449,7 +455,7 @@ func semgrepCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 		tool, toolErr = semgrep.FindTool(context.Background())
 	}
 	memo := semgrep.Memo{Tool: tool, Root: root, Paths: opts.paths}
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Engine == "semgrep" && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		if toolErr != nil {
@@ -485,7 +491,7 @@ func semgrepCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 		BuildSHA256:    build.SHA256(),
 		Verdicts:       verdicts,
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "semgrep", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("semgrep", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalSemgrepReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -526,7 +532,7 @@ func archunitCmd(root string, args []string, stdout, stderr io.Writer, d deps) i
 			defer env.Close()
 		}
 	}
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Engine == "archunit" && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		if envErr != nil {
@@ -553,7 +559,7 @@ func archunitCmd(root string, args []string, stdout, stderr io.Writer, d deps) i
 	if envErr == nil && selectedCount > 0 {
 		report.ArchUnitVersion = env.Version()
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "archunit", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("archunit", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalArchUnitReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -594,7 +600,7 @@ func importlinterCmd(root string, args []string, stdout, stderr io.Writer, d dep
 			defer env.Close()
 		}
 	}
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Engine == "importlinter" && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		if envErr != nil {
@@ -621,7 +627,7 @@ func importlinterCmd(root string, args []string, stdout, stderr io.Writer, d dep
 	if envErr == nil && selectedCount > 0 {
 		report.ImportLinterVersion = env.Version()
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "importlinter", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("importlinter", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalImportLinterReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -662,7 +668,7 @@ func kyvernoCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 			defer env.Close()
 		}
 	}
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Engine == "kyverno" && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		if envErr != nil {
@@ -689,7 +695,7 @@ func kyvernoCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 	if envErr == nil && selectedCount > 0 {
 		report.KyvernoVersion = env.Version()
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "kyverno", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("kyverno", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalKyvernoReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -735,7 +741,7 @@ func gatekeeperCmd(root string, args []string, stdout, stderr io.Writer, d deps)
 			defer env.Close()
 		}
 	}
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return isGatekeeperCheck(entry) && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		if envErr != nil {
@@ -762,7 +768,7 @@ func gatekeeperCmd(root string, args []string, stdout, stderr io.Writer, d deps)
 	if envErr == nil && selectedCount > 0 {
 		report.GatorVersion = env.Version()
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "gatekeeper", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("gatekeeper", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalGatekeeperReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -803,7 +809,7 @@ func eslintCmd(root string, args []string, stdout, stderr io.Writer, d deps) int
 			defer env.Close()
 		}
 	}
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Engine == "eslint" && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		if envErr != nil {
@@ -830,7 +836,7 @@ func eslintCmd(root string, args []string, stdout, stderr io.Writer, d deps) int
 	if envErr == nil && selectedCount > 0 {
 		report.ESLintVersion = env.Version()
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "eslint", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("eslint", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalESLintReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -869,7 +875,7 @@ func depcruiseCmd(root string, args []string, stdout, stderr io.Writer, d deps) 
 		tool, toolErr = depcruise.FindTool(context.Background())
 	}
 	memo := depcruise.Memo{Tool: tool, Root: root, Paths: opts.paths}
-	verdicts, checks, failed, selected, err := evaluateChecks(stdout, build, func(entry compiler.Entry) bool {
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Engine == "depcruise" && entry.Applies(opts.env, now)
 	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
 		if toolErr != nil {
@@ -905,7 +911,7 @@ func depcruiseCmd(root string, args []string, stdout, stderr io.Writer, d deps) 
 		BuildSHA256:      build.SHA256(),
 		Verdicts:         verdicts,
 	}
-	if err := writeOutputs(opts.report, opts.sarif, "depcruise", checks, func() ([]byte, error) {
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("depcruise", opts.env, opts.input), checks, func() ([]byte, error) {
 		return compiler.MarshalDepcruiseReport(report)
 	}); err != nil {
 		fprintln(stderr, err)
@@ -927,6 +933,7 @@ func openInput(path string) (io.ReadCloser, error) {
 type planOptions struct {
 	path   string
 	env    string
+	input  string
 	report string
 	sarif  string
 	bundle string
@@ -944,6 +951,12 @@ func parsePlanArgs(args []string) (planOptions, error) {
 			}
 			i++
 			opts.env = args[i]
+		case "--input":
+			if opts.input != "" || i+1 >= len(args) || !baseline.ValidInput(args[i+1]) {
+				return planOptions{}, fmt.Errorf("%s", planUsage)
+			}
+			i++
+			opts.input = args[i]
 		case "--report":
 			if opts.report != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
 				return planOptions{}, fmt.Errorf("%s", planUsage)
@@ -996,6 +1009,7 @@ func parsePlanArgs(args []string) (planOptions, error) {
 type cruiseOptions struct {
 	paths  []string
 	env    string
+	input  string
 	report string
 	sarif  string
 	jars   string
@@ -1019,6 +1033,12 @@ func parsePathArgs(args []string, usage string, jars bool) (cruiseOptions, error
 			}
 			i++
 			opts.env = args[i]
+		case "--input":
+			if opts.input != "" || i+1 >= len(args) || !baseline.ValidInput(args[i+1]) {
+				return cruiseOptions{}, fmt.Errorf("%s", usage)
+			}
+			i++
+			opts.input = args[i]
 		case "--report":
 			if opts.report != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
 				return cruiseOptions{}, fmt.Errorf("%s", usage)
@@ -1051,6 +1071,7 @@ func parsePathArgs(args []string, usage string, jars bool) (cruiseOptions, error
 type boundOptions struct {
 	path   string
 	env    string
+	input  string
 	report string
 	sarif  string
 	sha    string
@@ -1066,6 +1087,12 @@ func parseBoundArgs(args []string, usage string, sha bool) (boundOptions, error)
 			}
 			i++
 			opts.env = args[i]
+		case "--input":
+			if sha || opts.input != "" || i+1 >= len(args) || !baseline.ValidInput(args[i+1]) {
+				return boundOptions{}, fmt.Errorf("%s", usage)
+			}
+			i++
+			opts.input = args[i]
 		case "--report":
 			if opts.report != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
 				return boundOptions{}, fmt.Errorf("%s", usage)
@@ -1145,7 +1172,7 @@ func writeReport(path string, raw []byte) error {
 
 // evaluateChecks runs match against the build and prints one line per selected check.
 // hard is true when a block-mode check fails or any check errors.
-func evaluateChecks(stdout io.Writer, build compiler.Build, match func(compiler.Entry) bool, eval func(compiler.Entry, map[string][]byte) compiler.Outcome) (verdicts []compiler.Verdict, checks []sarif.Check, hard bool, selected int, err error) {
+func evaluateChecks(d deps, scope baseline.Scope, stdout io.Writer, build compiler.Build, match func(compiler.Entry) bool, eval func(compiler.Entry, map[string][]byte) compiler.Outcome) (verdicts []compiler.Verdict, checks []sarif.Check, hard bool, selected int, err error) {
 	for _, entry := range build.Entries {
 		if !match(entry) {
 			continue
@@ -1156,6 +1183,12 @@ func evaluateChecks(stdout io.Writer, build compiler.Build, match func(compiler.
 			return nil, nil, true, selected, artErr
 		}
 		outcome := eval(entry, artifacts)
+		if d.capture == nil {
+			outcome, err = baseline.Apply(entry, scope, outcome)
+			if err != nil {
+				return nil, nil, true, selected, err
+			}
+		}
 		verdict, failed := verdictOf(stdout, entry, outcome)
 		if failed {
 			hard = true
@@ -1163,12 +1196,17 @@ func evaluateChecks(stdout io.Writer, build compiler.Build, match func(compiler.
 		verdicts = append(verdicts, verdict)
 		checks = append(checks, sarif.Check{Entry: entry, Outcome: outcome})
 	}
+	if d.capture != nil {
+		d.capture.done = true
+		d.capture.scope = scope
+		d.capture.checks = checks
+	}
 	return verdicts, checks, hard, selected, nil
 }
 
 // writeOutputs writes the files a check command was asked for. Both are encoded first, so a file that
 // cannot be encoded leaves neither one behind.
-func writeOutputs(reportPath, sarifPath, subcommand string, checks []sarif.Check, marshal func() ([]byte, error)) error {
+func writeOutputs(reportPath, sarifPath, category string, checks []sarif.Check, marshal func() ([]byte, error)) error {
 	var report, results []byte
 	var err error
 	if reportPath != "" {
@@ -1177,7 +1215,7 @@ func writeOutputs(reportPath, sarifPath, subcommand string, checks []sarif.Check
 		}
 	}
 	if sarifPath != "" {
-		if results, err = sarif.Marshal(Version, subcommand, checks); err != nil {
+		if results, err = sarif.Marshal(Version, category, checks); err != nil {
 			return err
 		}
 	}
@@ -1224,10 +1262,27 @@ func verdictOf(stdout io.Writer, entry compiler.Entry, outcome compiler.Outcome)
 		fprintf(stdout, "%s: checks[%d] (%s): waived\n", entry.Slug, entry.CheckIndex, entry.Mode)
 		return verdict, false
 	case len(outcome.Violations) > 0:
-		verdict.Result = "fail"
-		verdict.Violations = len(outcome.Violations)
+		covered := 0
 		for _, violation := range outcome.Violations {
-			fprintf(stdout, "%s: checks[%d] (%s): %s\n", entry.Slug, entry.CheckIndex, entry.Mode, violationLine(violation))
+			if violation.Baselined {
+				covered++
+			}
+		}
+		if covered == len(outcome.Violations) {
+			verdict.Result = "waived"
+			verdict.Violations = covered
+			fprintf(stdout, "%s: checks[%d] (%s): waived (baseline: %d)\n", entry.Slug, entry.CheckIndex, entry.Mode, covered)
+			return verdict, false
+		}
+		verdict.Result = "fail"
+		verdict.Violations = len(outcome.Violations) - covered
+		for _, violation := range outcome.Violations {
+			if !violation.Baselined {
+				fprintf(stdout, "%s: checks[%d] (%s): %s\n", entry.Slug, entry.CheckIndex, entry.Mode, violationLine(violation))
+			}
+		}
+		if covered > 0 {
+			fprintf(stdout, "%s: checks[%d] (%s): baselined: %d\n", entry.Slug, entry.CheckIndex, entry.Mode, covered)
 		}
 		return verdict, entry.Mode == "block"
 	default:
@@ -1388,6 +1443,12 @@ func compileCmd(root string, stdout, stderr io.Writer, d deps) int {
 			lines = append(lines, compileLine(item.shown, report))
 		}
 	}
+	baselined, err := stampBaseline(root, compiled)
+	if err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
+	lines = append(lines, baselined...)
 	if err := compiler.WriteBuild(root, ids, compiled); err != nil {
 		fprintln(stderr, err)
 		return 1

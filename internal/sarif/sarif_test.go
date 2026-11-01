@@ -83,6 +83,65 @@ func TestGolden(t *testing.T) {
 	}
 }
 
+func TestCategory(t *testing.T) {
+	for _, tc := range []struct{ env, input, want string }{
+		{"", "", "plan"},
+		{"prod", "", "plan/prod"},
+		{"", "stack-a", "plan/-/stack-a"},
+		{"prod", "stack-a", "plan/prod/stack-a"},
+		{"a/b", "", "plan/a%2Fb"},
+		{"a", "b", "plan/a/b"},
+	} {
+		if got := Category("plan", tc.env, tc.input); got != tc.want {
+			t.Fatalf("%q %q: got %q want %q", tc.env, tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestBaselinedResults(t *testing.T) {
+	newOne := compiler.Violation{Message: "engine text", Identity: []string{"a"}}
+	covered := compiler.Violation{Message: "engine text", Identity: []string{"b"}, Baselined: true}
+	raw, err := Marshal("1.2.3", "plan", []Check{{Entry: entry(0, "block"), Outcome: compiler.Outcome{Violations: []compiler.Violation{covered, newOne, covered}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sariftest.Validate(t, raw)
+	run := decode(t, raw).Runs[0]
+	if len(run.Results) != 2 {
+		t.Fatalf("results %+v", run.Results)
+	}
+	fresh, baselined := run.Results[0], run.Results[1]
+	if fresh.Level != levelError || len(fresh.Suppressions) != 0 || !strings.Contains(fresh.Message.Text, "1 violation") {
+		t.Fatalf("new result %+v", fresh)
+	}
+	if baselined.Level != levelNote || !strings.HasPrefix(baselined.Message.Text, "Baselined: ") || !strings.Contains(baselined.Message.Text, "2 violations") || len(baselined.Suppressions) != 1 {
+		t.Fatalf("baselined result %+v", baselined)
+	}
+	if fresh.PartialFingerprints.PrimaryLocationLineHash == baselined.PartialFingerprints.PrimaryLocationLineHash {
+		t.Fatal("two results share a fingerprint")
+	}
+	if strings.Contains(string(raw), "engine text") {
+		t.Fatalf("engine output leaked: %s", raw)
+	}
+}
+
+// A new violation must not read as a note because a baselined result came first.
+func TestRuleLevelIsTheMostSevere(t *testing.T) {
+	first := located("a.py", 1)
+	first.Baselined = true
+	raw, err := Marshal("1.2.3", "semgrep", []Check{{Entry: entry(0, "block"), Outcome: compiler.Outcome{Violations: []compiler.Violation{first, located("b.py", 1)}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := decode(t, raw).Runs[0]
+	if len(run.Tool.Driver.Rules) != 1 || run.Tool.Driver.Rules[0].DefaultConfiguration.Level != levelError {
+		t.Fatalf("rules %+v", run.Tool.Driver.Rules)
+	}
+	if run.Results[0].Level != levelNote || run.Results[1].Level != levelError {
+		t.Fatalf("results %+v", run.Results)
+	}
+}
+
 func TestErrorWithoutCodeIsGeneric(t *testing.T) {
 	raw, err := Marshal("1.2.3", "plan", []Check{{Entry: entry(0, "block"), Outcome: compiler.Outcome{Err: errors.New("secret text")}}})
 	if err != nil {

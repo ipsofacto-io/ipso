@@ -52,6 +52,14 @@ type Finding struct {
 	Line string
 }
 
+// lineMarker is the line list import-linter renders after an import, such as (l.1) or (l.1, l.3).
+var lineMarker = regexp.MustCompile(`\s*\(l\.\d+(?:, l\.\d+)*\)`)
+
+// identity leaves out the line list, so an import that moves keeps its fingerprint.
+func (f Finding) identity() []string {
+	return []string{f.Contract, lineMarker.ReplaceAllString(f.Line, "")}
+}
+
 func (f Finding) message() string {
 	return compiler.EscapeControls(f.Contract) + " " + compiler.EscapeControls(f.Line)
 }

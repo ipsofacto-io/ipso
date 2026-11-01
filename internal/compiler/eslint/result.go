@@ -267,5 +267,5 @@ func incompleteError(f Finding) error {
 func (f Finding) violation() compiler.Violation {
 	line := fmt.Sprintf("%s %s:%d:%d: %s", compiler.EscapeControls(f.Rule), compiler.EscapeControls(f.Path), f.Line, f.Column, compiler.EscapeControls(f.Message))
 	position := &compiler.Position{Path: f.Path, StartLine: f.Line, StartColumn: f.Column, EndLine: f.EndLine, EndColumn: f.EndColumn}
-	return compiler.Violation{Message: line, Position: position}
+	return compiler.Violation{Message: line, Position: position, Identity: []string{f.Rule, f.Path}}
 }

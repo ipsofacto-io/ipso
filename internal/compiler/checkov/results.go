@@ -182,10 +182,10 @@ func EvalCheck(entry compiler.Entry, artifacts map[string][]byte, results Result
 	}
 	var violations []compiler.Violation
 	for _, hit := range results.Failed[id] {
-		violations = append(violations, compiler.Violation{Message: hitMessage("failed", id, hit)})
+		violations = append(violations, compiler.Violation{Message: hitMessage("failed", id, hit), Identity: []string{"failed", id, hit.Resource, hit.FilePath}})
 	}
 	for _, hit := range results.Skipped[id] {
-		violations = append(violations, compiler.Violation{Message: hitMessage("skipped", id, hit)})
+		violations = append(violations, compiler.Violation{Message: hitMessage("skipped", id, hit), Identity: []string{"skipped", id, hit.Resource, hit.FilePath}})
 	}
 	if len(violations) == 0 && len(results.Passed[id]) == 0 {
 		violations = append(violations, compiler.Violation{Message: "check not reported: " + id})

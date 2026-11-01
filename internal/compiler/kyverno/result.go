@@ -227,7 +227,8 @@ func outputError(reason string) error {
 // The verdict report never carries it.
 func (f Finding) violation() compiler.Violation {
 	return compiler.Violation{
-		Address: compiler.EscapeControls(f.Resource),
-		Message: compiler.EscapeControls(f.Message),
+		Address:  compiler.EscapeControls(f.Resource),
+		Message:  compiler.EscapeControls(f.Message),
+		Identity: []string{f.Resource},
 	}
 }

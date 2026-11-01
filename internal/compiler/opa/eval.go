@@ -157,7 +157,7 @@ func oneViolation(item any) (compiler.Violation, error) {
 		if value == "" {
 			return compiler.Violation{}, fmt.Errorf("deny returned an empty string")
 		}
-		return compiler.Violation{Message: value}, nil
+		return compiler.Violation{Message: value, Identity: []string{value}}, nil
 	case map[string]any:
 		message, ok := value["msg"].(string)
 		if !ok || message == "" {
@@ -170,7 +170,11 @@ func oneViolation(item any) (compiler.Violation, error) {
 				return compiler.Violation{}, fmt.Errorf("deny object address is not a string")
 			}
 		}
-		return compiler.Violation{Message: message, Address: address}, nil
+		identity := address
+		if identity == "" {
+			identity = message
+		}
+		return compiler.Violation{Message: message, Address: address, Identity: []string{identity}}, nil
 	default:
 		return compiler.Violation{}, fmt.Errorf("deny returned %T", item)
 	}

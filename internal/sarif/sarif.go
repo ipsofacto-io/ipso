@@ -35,6 +35,9 @@ const (
 	levelError   = "error"
 	levelWarning = "warning"
 	levelNote    = "note"
+
+	kindWaived    = "Waived"
+	kindBaselined = "Baselined"
 )
 
 // safeToken is the form of a reason code and of a slug that is safe in a code span.
@@ -166,9 +169,26 @@ type item struct {
 	order  int
 }
 
-// Marshal encodes one run for a subcommand. The output has no timestamp, so the same outcomes give the same bytes.
+// Category names one run: the subcommand, then the env and input when the run has them, so runs over
+// different inputs do not close each other's alerts. An env is escaped so it stays one path segment,
+// and "-" stands for no env, which --env cannot be. Input names are limited to characters a segment allows.
+func Category(subcommand, env, input string) string {
+	segments := []string{subcommand}
+	switch {
+	case env != "":
+		segments = append(segments, url.PathEscape(env))
+	case input != "":
+		segments = append(segments, "-")
+	}
+	if input != "" {
+		segments = append(segments, input)
+	}
+	return strings.Join(segments, "/")
+}
+
+// Marshal encodes one run for a category. The output has no timestamp, so the same outcomes give the same bytes.
 // A check without a decision path or title fails with build-manifest: that build predates SARIF and needs ipso compile.
-func Marshal(version, subcommand string, checks []Check) ([]byte, error) {
+func Marshal(version, category string, checks []Check) ([]byte, error) {
 	ordered := append([]Check(nil), checks...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		if ordered[i].Entry.DecisionID != ordered[j].Entry.DecisionID {
@@ -206,6 +226,10 @@ func Marshal(version, subcommand string, checks []Check) ([]byte, error) {
 			indexes[one.result.RuleID] = index
 			rules = append(rules, ruleOf(one.entry, one.result.Level))
 		}
+		// A check can mix new and baselined results, and a new violation must not read as a note.
+		if levelRank(one.result.Level) < levelRank(rules[index].DefaultConfiguration.Level) {
+			rules[index].DefaultConfiguration.Level = one.result.Level
+		}
 		one.result.RuleIndex = index
 		results = append(results, one.result)
 	}
@@ -226,7 +250,7 @@ func Marshal(version, subcommand string, checks []Check) ([]byte, error) {
 				InformationURI: "https://github.com/ipsofacto-io/ipso",
 				Rules:          rules,
 			}},
-			AutomationDetails: automationDetails{ID: "ipso/" + subcommand + "/"},
+			AutomationDetails: automationDetails{ID: "ipso/" + category + "/"},
 			Invocations:       []invocation{{ExecutionSuccessful: successful, ToolExecutionNotifications: notifications}},
 			Results:           results,
 		}},
@@ -247,49 +271,81 @@ func resultsOf(check Check) []item {
 	entry := check.Entry
 	if check.Outcome.Err != nil {
 		text := fmt.Sprintf("%s: check %d could not be evaluated (%s). See the [decision](%d).", linkText(entry.Title), entry.CheckIndex, errorCode(check.Outcome.Err), decisionLocationID)
-		return []item{newItem(entry, levelError, text, decisionPhysical(entry), 1, false)}
+		return []item{newItem(entry, levelError, text, decisionPhysical(entry), 1, "")}
 	}
-	var located []compiler.Position
-	unlocated := 0
+	var located []compiler.Violation
+	unlocated, unlocatedBaselined := 0, 0
 	for _, violation := range check.Outcome.Violations {
-		if violation.Position == nil {
+		switch {
+		case violation.Position != nil:
+			located = append(located, violation)
+		case violation.Baselined:
+			unlocatedBaselined++
+		default:
 			unlocated++
-			continue
 		}
-		located = append(located, *violation.Position)
 	}
 	sort.SliceStable(located, func(i, j int) bool {
-		if located[i].Path != located[j].Path {
-			return located[i].Path < located[j].Path
+		a, b := located[i].Position, located[j].Position
+		if a.Path != b.Path {
+			return a.Path < b.Path
 		}
-		if located[i].StartLine != located[j].StartLine {
-			return located[i].StartLine < located[j].StartLine
+		if a.StartLine != b.StartLine {
+			return a.StartLine < b.StartLine
 		}
-		return located[i].StartColumn < located[j].StartColumn
+		return a.StartColumn < b.StartColumn
 	})
 	level := levelOf(entry.Mode)
-	waived := check.Outcome.Waived
 	var items []item
 	seen := map[string]int{}
-	for _, position := range located {
+	for _, violation := range located {
+		position := *violation.Position
 		physical := decisionPhysical(entry)
 		if compiler.ValidRepoPath(position.Path) && position.StartLine >= 1 {
 			physical = physicalLocation{ArtifactLocation: artifactOf(position.Path), Region: regionOf(position)}
 		}
 		seen[physical.ArtifactLocation.URI]++
 		text := fmt.Sprintf("%s: check %d reported a violation here. See the [decision](%d).", linkText(entry.Title), entry.CheckIndex, decisionLocationID)
-		items = append(items, newItem(entry, level, text, physical, seen[physical.ArtifactLocation.URI], waived))
+		items = append(items, newItem(entry, level, text, physical, seen[physical.ArtifactLocation.URI], suppressionKind(check.Outcome.Waived, violation.Baselined)))
 	}
-	if unlocated > 0 {
+	for _, group := range []struct {
+		count int
+		kind  string
+	}{
+		{unlocated, suppressionKind(check.Outcome.Waived, false)},
+		{unlocatedBaselined, kindBaselined},
+	} {
+		if group.count == 0 {
+			continue
+		}
 		physical := decisionPhysical(entry)
 		seen[physical.ArtifactLocation.URI]++
-		text := fmt.Sprintf("%s: check %d failed with %s. See the [decision](%d).", linkText(entry.Title), entry.CheckIndex, violationCount(unlocated), decisionLocationID)
-		items = append(items, newItem(entry, level, text, physical, seen[physical.ArtifactLocation.URI], waived))
+		text := fmt.Sprintf("%s: check %d failed with %s. See the [decision](%d).", linkText(entry.Title), entry.CheckIndex, violationCount(group.count), decisionLocationID)
+		items = append(items, newItem(entry, level, text, physical, seen[physical.ArtifactLocation.URI], group.kind))
 	}
 	return items
 }
 
-func newItem(entry compiler.Entry, level, text string, physical physicalLocation, ordinal int, waived bool) item {
+// suppressionKind names why a result is suppressed, or is empty when it is not. A waiver covers the whole check.
+func suppressionKind(waived, baselined bool) string {
+	switch {
+	case waived:
+		return kindWaived
+	case baselined:
+		return kindBaselined
+	default:
+		return ""
+	}
+}
+
+func justification(kind string) string {
+	if kind == kindBaselined {
+		return "A baseline of existing violations covers this result."
+	}
+	return "A waiver on the decision is in force."
+}
+
+func newItem(entry compiler.Entry, level, text string, physical physicalLocation, ordinal int, kind string) item {
 	id := ruleID(entry)
 	out := result{
 		RuleID:    id,
@@ -304,11 +360,11 @@ func newItem(entry compiler.Entry, level, text string, physical physicalLocation
 		PartialFingerprints: fingerprints{PrimaryLocationLineHash: fingerprint(id, physical.ArtifactLocation.URI, ordinal)},
 	}
 	rank := levelRank(level)
-	if waived {
-		// GitHub ignores suppressions and leaves the alert open, so the level and the message carry the waiver.
+	if kind != "" {
+		// GitHub ignores suppressions and leaves the alert open, so the level and the message carry the reason.
 		out.Level = levelNote
-		out.Message.Text = "Waived: " + text
-		out.Suppressions = []suppression{{Kind: "external", Justification: "A waiver on the decision is in force."}}
+		out.Message.Text = kind + ": " + text
+		out.Suppressions = []suppression{{Kind: "external", Justification: justification(kind)}}
 		rank = levelRank(levelNote) + 1
 	}
 	return item{entry: entry, result: out, rank: rank}

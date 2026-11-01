@@ -169,7 +169,7 @@ func (e *Env) Evaluate(ctx context.Context, entry compiler.Entry, artifacts map[
 	}
 	var violations []compiler.Violation
 	for _, item := range findings {
-		violations = append(violations, compiler.Violation{Message: item.message()})
+		violations = append(violations, compiler.Violation{Message: item.message(), Identity: item.identity()})
 	}
 	return compiler.Cover(entry, compiler.Outcome{Violations: violations}, now)
 }

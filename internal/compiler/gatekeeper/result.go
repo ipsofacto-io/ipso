@@ -175,7 +175,8 @@ func outputError(reason string) error {
 // The verdict report never carries it.
 func (f Finding) violation() compiler.Violation {
 	return compiler.Violation{
-		Address: compiler.EscapeControls(f.Object),
-		Message: compiler.EscapeControls(f.Message),
+		Address:  compiler.EscapeControls(f.Object),
+		Message:  compiler.EscapeControls(f.Message),
+		Identity: []string{f.Object},
 	}
 }

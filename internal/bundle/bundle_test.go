@@ -325,3 +325,32 @@ func codeIs(err error, code string) bool {
 	var ce *compiler.Error
 	return errors.As(err, &ce) && ce.Code == code
 }
+
+func TestEntryLimitBindsArtifactsAndNotTheManifest(t *testing.T) {
+	big := bytes.Repeat([]byte("x"), compiler.MaxRefBytes+1)
+	layer, err := writeTar(big, map[string][]byte{})
+	if err != nil {
+		t.Fatalf("a large manifest must pack: %v", err)
+	}
+	manifest, _, err := readTar(layer)
+	if err != nil || len(manifest) != len(big) {
+		t.Fatalf("a large manifest must read: %d %v", len(manifest), err)
+	}
+	if _, err := writeTar([]byte("{}"), map[string][]byte{"a/0/x": big}); compiler.CodeOf(err) != compiler.CodeRefTooLarge {
+		t.Fatalf("a large artifact must not pack: %v", err)
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: "a/0/x", Mode: 0o644, Size: int64(len(big)), Typeflag: tar.TypeReg, Format: tar.FormatUSTAR}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(big); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readTar(buf.Bytes()); err == nil {
+		t.Fatal("a large artifact must not read")
+	}
+}
