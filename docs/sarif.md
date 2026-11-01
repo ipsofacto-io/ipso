@@ -1,6 +1,6 @@
 # SARIF output
 
-Every engine check takes `--sarif <file>`: `plan`, `ci`, `checkov`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, and `eslint`. The file holds one SARIF 2.1.0 run. The contract is ADR-0058 in `ipsofacto-io/ipso-spec`.
+Every engine check takes `--sarif <file>`: `plan`, `ci`, `checkov`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, and `eslint`. The file holds one SARIF 2.1.0 run. The contract is ADR-0058 in `ipsofacto-io/ipso-spec`, and ADR-0059 adds the input names to the category.
 
 ```bash
 ipso compile
@@ -20,7 +20,7 @@ The file is written with the same rules as `--report`: mode 0600, a symlink at t
 | `waived` | The same result at `note` level, with a message that starts with `Waived:` and an `external` suppression |
 | `error` | An `error` result on the decision file with the reason code only |
 
-Semgrep and ESLint emit one result per finding, at its file and line. Every other engine emits one result per failed check, on the decision file, with the violation count. Every result links to its decision file through `relatedLocations`, and rule help names the file and the `ipso explain <slug>` command.
+Semgrep and ESLint emit one result per finding, at its file and line. Every other engine emits one result per failed check, on the decision file, with the violation count. A violation a baseline covers (see [baseline.md](baseline.md)) is marked like a waived one, at `note` level, with a `Baselined:` message and an `external` suppression. Every result links to its decision file through `relatedLocations`, and rule help names the file and the `ipso explain <slug>` command.
 
 GitHub ignores the suppression, so a waived result stays an open alert at note severity until the waiver ends or the finding is fixed.
 
@@ -32,9 +32,10 @@ Messages are written by ipso. Engine messages, plan values, resource addresses, 
 
 ## Uploading
 
-Each subcommand has its own category, `ipso/<subcommand>/`, so upload one file per subcommand. An upload replaces the alerts of its category for that ref:
+Each run has its own category, so upload one file per run. The category is `ipso/<subcommand>/`, followed by the `--env` and `--input` values when a run has them: `ipso/plan/prod/`, `ipso/plan/-/stack-a/`, or `ipso/plan/prod/stack-a/`. An upload replaces the alerts of its category for that ref:
 
-- A run with no selected checks is valid and empty, so it closes the alerts of that category. Use the same `--env` on every run of a category.
+- A run with no selected checks is valid and empty, so it closes the alerts of that category.
+- Renaming an env or input starts a new category, so the old category's alerts stay until they are closed.
 - An errored Semgrep or ESLint check has one result on the decision file and no per-finding results, so its per-finding alerts close until the next successful run. The command exits 1 in that case.
 
 GitHub labels alerts on decision files as documentation, because they sit in Markdown files. Its "Only alerts in application code" filter hides them, so turn that filter off to see every ipso result.

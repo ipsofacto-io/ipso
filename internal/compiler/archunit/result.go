@@ -91,9 +91,17 @@ func (e *Env) Evaluate(ctx context.Context, entry compiler.Entry, artifacts map[
 	}
 	var violations []compiler.Violation
 	for _, item := range findings {
-		violations = append(violations, compiler.Violation{Message: item.message()})
+		violations = append(violations, compiler.Violation{Message: item.message(), Identity: item.identity()})
 	}
 	return compiler.Cover(entry, compiler.Outcome{Violations: violations}, now)
+}
+
+// renderedLineNumber is the line number ArchUnit puts at the end of a rendered line, such as (A.java:3).
+var renderedLineNumber = regexp.MustCompile(`:\d+\)$`)
+
+// identity leaves out the source line, so a finding that moves keeps its fingerprint.
+func (f Finding) identity() []string {
+	return []string{f.Rule, renderedLineNumber.ReplaceAllString(f.Line, ")")}
 }
 
 func (f Finding) message() string {

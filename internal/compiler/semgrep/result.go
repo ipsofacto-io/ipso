@@ -117,7 +117,7 @@ func EvalCheck(entry compiler.Entry, artifacts map[string][]byte, toolVersion st
 	}
 	var violations []compiler.Violation
 	for _, item := range result.Findings {
-		violations = append(violations, compiler.Violation{Message: item.message(), Position: item.position()})
+		violations = append(violations, compiler.Violation{Message: item.message(), Position: item.position(), Identity: []string{item.Rule, item.position().Path}})
 	}
 	return compiler.Cover(entry, compiler.Outcome{Violations: violations}, now)
 }

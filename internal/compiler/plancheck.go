@@ -94,6 +94,9 @@ func Materialize(manifest []byte, open func(rel string) ([]byte, error)) (Build,
 		if err := entry.dates(); err != nil {
 			return Build{}, &Error{Code: CodeBuildManifest, Err: err}
 		}
+		if err := entry.Baseline.validate(); err != nil {
+			return Build{}, &Error{Code: CodeBuildManifest, Err: fmt.Errorf("decision %s check %d: %w", entry.DecisionID, entry.CheckIndex, err)}
+		}
 		if entry.Path != "" && !ValidRepoPath(entry.Path) {
 			return Build{}, &Error{Code: CodeBuildManifest, Err: fmt.Errorf("decision %s path is not inside the repository", entry.DecisionID)}
 		}
@@ -223,10 +226,14 @@ func (e Entry) Selected(env string, now time.Time) bool {
 
 // Violation is one denial from a check. The terminal prints it. The report stores only the count.
 // Position is set by engines that report a place in a repository file, and SARIF is its only reader.
+// Identity is the raw values that feed a baseline fingerprint (ADR-0059), and no output prints it.
+// A nil Identity means the violation cannot be baselined. Baselined is set when a baseline covers it.
 type Violation struct {
-	Message  string
-	Address  string
-	Position *Position
+	Message   string
+	Address   string
+	Position  *Position
+	Identity  []string
+	Baselined bool
 }
 
 // Position is a place in a repository file. Path is slash-separated and relative to the repository root.
@@ -237,6 +244,40 @@ type Position struct {
 	StartColumn int
 	EndLine     int
 	EndColumn   int
+}
+
+// MaxBaselineFingerprints is the most fingerprints one decision can hold (ADR-0052).
+const MaxBaselineFingerprints = 100000
+
+// ValidDigest reports whether value is 64 lowercase hex characters.
+func ValidDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	return strings.Trim(value, "0123456789abcdef") == ""
+}
+
+func (b *ManifestBaseline) validate() error {
+	if b == nil {
+		return nil
+	}
+	if !ValidDigest(b.Salt) {
+		return fmt.Errorf("baseline salt is not 64 lowercase hex characters")
+	}
+	if len(b.Fingerprints) > MaxBaselineFingerprints {
+		return fmt.Errorf("baseline has more than %d fingerprints", MaxBaselineFingerprints)
+	}
+	seen := make(map[string]struct{}, len(b.Fingerprints))
+	for _, digest := range b.Fingerprints {
+		if !ValidDigest(digest) {
+			return fmt.Errorf("baseline fingerprint is not 64 lowercase hex characters")
+		}
+		if _, ok := seen[digest]; ok {
+			return fmt.Errorf("baseline repeats a fingerprint")
+		}
+		seen[digest] = struct{}{}
+	}
+	return nil
 }
 
 // ValidRepoPath reports whether path is a clean slash-separated path inside the repository.

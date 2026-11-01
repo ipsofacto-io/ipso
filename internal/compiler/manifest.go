@@ -14,7 +14,7 @@ import (
 )
 
 // Entry is one compiled check in the manifest. The framework fills every field
-// except Path and Title, which ipso compile stamps from the file it read.
+// except Path, Title, and Baseline, which ipso compile stamps from the files it read.
 type Entry struct {
 	DecisionID      string             `json:"decision_id"`
 	Slug            string             `json:"slug"`
@@ -31,6 +31,14 @@ type Entry struct {
 	Compiler        string             `json:"compiler"`
 	CompilerVersion string             `json:"compiler_version"`
 	Artifacts       []ManifestArtifact `json:"artifacts"`
+	Baseline        *ManifestBaseline  `json:"baseline,omitempty"`
+}
+
+// ManifestBaseline is what ipso compile stamps from the local baseline file: the salt and the
+// fingerprints of one check. The digest contract is ADR-0059.
+type ManifestBaseline struct {
+	Salt         string   `json:"salt"`
+	Fingerprints []string `json:"fingerprints"`
 }
 
 // ManifestWaiver is one waiver stamped from the record, dates as YYYY-MM-DD.

@@ -38,7 +38,7 @@ func writeTar(manifest []byte, files map[string][]byte) ([]byte, error) {
 		if name != manifestName {
 			body = files[name]
 		}
-		if len(body) > compiler.MaxRefBytes {
+		if len(body) > entryLimit(name) {
 			return nil, &compiler.Error{Code: compiler.CodeRefTooLarge, Err: fmt.Errorf("%s is %d bytes", name, len(body))}
 		}
 		hdr := &tar.Header{
@@ -65,6 +65,15 @@ func writeTar(manifest []byte, files map[string][]byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// entryLimit is the largest tar entry. An artifact is bound by MaxRefBytes. The manifest grows with the
+// baseline digests it carries (ADR-0059), so only the layout limit binds it.
+func entryLimit(name string) int {
+	if name == manifestName {
+		return maxLayoutBytes
+	}
+	return compiler.MaxRefBytes
+}
+
 func readTar(layer []byte) (manifest []byte, files map[string][]byte, err error) {
 	if len(layer) > maxLayoutBytes {
 		return nil, nil, layoutErr("layout is too large")
@@ -87,7 +96,7 @@ func readTar(layer []byte) (manifest []byte, files map[string][]byte, err error)
 		if err != nil {
 			return nil, nil, err
 		}
-		if hdr.Size < 0 || hdr.Size > compiler.MaxRefBytes {
+		if hdr.Size < 0 || hdr.Size > int64(entryLimit(name)) {
 			return nil, nil, layoutErr("tar entry")
 		}
 		body, err := io.ReadAll(io.LimitReader(tr, hdr.Size+1))
