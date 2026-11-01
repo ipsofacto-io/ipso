@@ -28,7 +28,7 @@ func Match(root string, patterns []string) ([]string, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		for _, pattern := range patterns {
-			if matchPattern(pattern, rel) {
+			if MatchPath(pattern, rel) {
 				matches = append(matches, path)
 				break
 			}
@@ -41,7 +41,8 @@ func Match(root string, patterns []string) ([]string, error) {
 	return matches, nil
 }
 
-func matchPattern(pattern, rel string) bool {
+// MatchPath reports whether a slash-separated relative path matches one pattern.
+func MatchPath(pattern, rel string) bool {
 	return matchParts(strings.Split(pattern, "/"), strings.Split(rel, "/"))
 }
 

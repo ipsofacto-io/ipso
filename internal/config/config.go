@@ -38,14 +38,23 @@ func Load(root string) (Config, bool, error) {
 	if err != nil {
 		return Config{}, false, err
 	}
-	var cfg Config
-	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return Config{}, true, fmt.Errorf("%s: %w", fileName, err)
-	}
-	if len(cfg.Decisions) == 0 {
-		return Config{}, true, fmt.Errorf("%s: decisions must list at least one glob", fileName)
+	cfg, err := Parse(raw)
+	if err != nil {
+		return Config{}, true, err
 	}
 	return cfg, true, nil
+}
+
+// Parse reads the bytes of a config file.
+func Parse(raw []byte) (Config, error) {
+	var cfg Config
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", fileName, err)
+	}
+	if len(cfg.Decisions) == 0 {
+		return Config{}, fmt.Errorf("%s: decisions must list at least one glob", fileName)
+	}
+	return cfg, nil
 }
 
 // Init writes the default config when it is absent.
