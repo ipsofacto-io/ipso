@@ -251,6 +251,33 @@ jobs:
         env:
           IPSO_GATEKEEPER: "1"
 
+  render:
+    name: ci / render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install the render tools and the engines
+        run: |
+          set -euo pipefail
+          bash internal/render/testdata/tool/install.sh
+          bash internal/compiler/kyverno/testdata/tool/install.sh
+          bash internal/compiler/opa/testdata/tool/install.sh
+          {
+            echo "${GITHUB_WORKSPACE}/internal/render/testdata/tool/bin"
+            echo "${GITHUB_WORKSPACE}/internal/compiler/kyverno/testdata/tool/bin"
+            echo "${GITHUB_WORKSPACE}/internal/compiler/opa/testdata/tool/bin"
+          } >> "$GITHUB_PATH"
+      - name: Render and evaluate the fixtures
+        run: go test ./internal/render ./internal/cli -run 'Render|Pinned|Sandbox' -count=1
+        env:
+          IPSO_RENDER: "1"
+
   eslint:
     name: ci / eslint
     runs-on: ubuntu-latest
