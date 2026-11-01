@@ -37,6 +37,10 @@ ipso explain <slug>
 
 `ipso init` writes `.ipso/config.yaml` when that file is absent. The default glob is `docs/decisions/**/*.md`. Put EDR Markdown files under that path, then run `ipso check`. Use `ipso explain <slug>` to print the title, status, id, path, sources, and Decision section for one file.
 
+## GitHub Actions
+
+[`ipsofacto-io/ipso-action`](https://github.com/ipsofacto-io/ipso-action) runs one check in a job, uploads its SARIF file to code scanning, and keeps the evidence as an artifact. [docs/github-action.md](docs/github-action.md) has an example workflow.
+
 ## Secure use
 
 - `ipso check`, `ipso explain`, `ipso compile`, `ipso check plan`, `ipso check ci`, and `ipso check checkov` run offline. They read local files that match the config globs and do not call a network service. `ipso premise check` performs the public HTTPS GET from ADR-0053. It sends no Authorization header and no cookies, refuses an IP literal, a private address, and a redirect, and it does not edit the EDR.
