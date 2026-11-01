@@ -1,13 +1,9 @@
-// Package mcptools is the MCP tool set of ipso: names, schemas, and registration. The local stdio
-// server in this module and the remote server in ipso-server register the same tools over their own
+// Package mcptools is the MCP server of ipso: the tool contract and the protocol. The local stdio
+// server in this module and the remote server in ipso-server answer through it over their own
 // backends, so a client sees one contract (ADR-0073).
 package mcptools
 
-import (
-	"context"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-)
+import "context"
 
 // Tool names from section 3.5 of the specification.
 const (
@@ -20,10 +16,10 @@ const (
 // ApplicableInput selects decisions. A field left out widens the answer, so a caller limited to a
 // path or an environment must pass it.
 type ApplicableInput struct {
-	Repo   string   `json:"repo,omitempty" jsonschema:"the repository as owner/name. Left out, a scope that names a repository still matches"`
-	Paths  []string `json:"paths,omitempty" jsonschema:"paths from the repository root that the work touches"`
-	Env    string   `json:"env,omitempty" jsonschema:"the environment the work targets"`
-	Intent string   `json:"intent,omitempty" jsonschema:"what the work is for. It does not change the answer, because deterministic scope decides what applies"`
+	Repo   string   `json:"repo,omitempty"`
+	Paths  []string `json:"paths,omitempty"`
+	Env    string   `json:"env,omitempty"`
+	Intent string   `json:"intent,omitempty"`
 }
 
 // Check is one check a decision carries.
@@ -39,11 +35,11 @@ type Decision struct {
 	Slug        string   `json:"slug"`
 	Title       string   `json:"title,omitempty"`
 	Status      string   `json:"status"`
-	State       string   `json:"state" jsonschema:"the brand state: Under verification, Verified, or Needs review"`
+	State       string   `json:"state"`
 	Criticality string   `json:"criticality"`
-	Record      string   `json:"record" jsonschema:"where the decision is recorded"`
+	Record      string   `json:"record"`
 	Sources     []string `json:"sources"`
-	Paths       []string `json:"paths" jsonschema:"the globs of the scope. Empty means the whole repository"`
+	Paths       []string `json:"paths"`
 	Statement   string   `json:"statement,omitempty"`
 	Sensitive   bool     `json:"sensitive,omitempty"`
 	Checks      []Check  `json:"checks"`
@@ -56,9 +52,9 @@ type ApplicableOutput struct {
 
 // GetInput names one decision and, optionally, the times to read it at.
 type GetInput struct {
-	Ref       string `json:"ref" jsonschema:"the id or slug of the decision"`
-	AsOfValid string `json:"as_of_valid,omitempty" jsonschema:"a YYYY-MM-DD date. in_force then answers for that date"`
-	AsOfTx    string `json:"as_of_tx,omitempty" jsonschema:"a transaction time. Only a server with a registry can answer it"`
+	Ref       string `json:"ref"`
+	AsOfValid string `json:"as_of_valid,omitempty"`
+	AsOfTx    string `json:"as_of_tx,omitempty"`
 }
 
 // GetOutput is one decision. Body is empty for a sensitive decision.
@@ -70,29 +66,29 @@ type GetOutput struct {
 
 // EvaluateInput holds exactly one of a diff and a plan.
 type EvaluateInput struct {
-	Diff string `json:"diff,omitempty" jsonschema:"a unified diff against the working tree"`
-	Plan string `json:"plan,omitempty" jsonschema:"the JSON of terraform show -json or tofu show -json"`
-	Env  string `json:"env,omitempty" jsonschema:"the environment to evaluate for"`
+	Diff string `json:"diff,omitempty"`
+	Plan string `json:"plan,omitempty"`
+	Env  string `json:"env,omitempty"`
 }
 
 // EvaluateOutput is the verdict. NotEvaluated names compiled checks this input cannot reach, so a
 // clean verdict is not read as covering them.
 type EvaluateOutput struct {
-	Blocked      bool     `json:"blocked" jsonschema:"true when a block-mode check has an uncovered violation or a check could not evaluate"`
+	Blocked      bool     `json:"blocked"`
 	Lines        []string `json:"lines"`
-	SARIF        string   `json:"sarif" jsonschema:"the SARIF 2.1.0 log"`
+	SARIF        string   `json:"sarif"`
 	NotEvaluated []string `json:"not_evaluated"`
 }
 
 // ProposeInput is a new decision for a person to review. Nothing here can approve it.
 type ProposeInput struct {
-	Title        string   `json:"title" jsonschema:"a short name for the decision"`
-	Statement    string   `json:"statement" jsonschema:"what is decided"`
-	Rationale    string   `json:"rationale" jsonschema:"why, and what prompted it"`
-	Verification string   `json:"verification,omitempty" jsonschema:"how a check could prove it"`
-	Paths        []string `json:"paths,omitempty" jsonschema:"globs the decision would apply to. Left out, the whole repository"`
-	Env          []string `json:"env,omitempty" jsonschema:"environments the decision would apply to"`
-	SessionRef   string   `json:"session_ref,omitempty" jsonschema:"a reference to the agent session"`
+	Title        string   `json:"title"`
+	Statement    string   `json:"statement"`
+	Rationale    string   `json:"rationale"`
+	Verification string   `json:"verification,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	Env          []string `json:"env,omitempty"`
+	SessionRef   string   `json:"session_ref,omitempty"`
 }
 
 // ProposeOutput says where the proposal is. Its status is always proposed.
@@ -108,47 +104,4 @@ type Backend interface {
 	Get(context.Context, GetInput) (GetOutput, error)
 	Evaluate(context.Context, EvaluateInput) (EvaluateOutput, error)
 	Propose(context.Context, ProposeInput) (ProposeOutput, error)
-}
-
-// NewServer returns a server with the four tools. Only decisions.propose has a side effect, and
-// that effect creates a proposal.
-func NewServer(version string, backend Backend) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "ipso", Version: version}, &mcp.ServerOptions{
-		Instructions: "Engineering decisions in force for this repository. Read them before editing, and propose a new decision instead of working around one. A proposal needs a person's approval.",
-	})
-	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
-	notDestructive := false
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolApplicable,
-		Title:       "Applicable decisions",
-		Description: "List the engineering decisions in force for a repository, paths, and an environment, with their checks and state.",
-		Annotations: readOnly,
-	}, handler(backend.Applicable))
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolGet,
-		Title:       "Get a decision",
-		Description: "Read one engineering decision by id or slug.",
-		Annotations: readOnly,
-	}, handler(backend.Get))
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolEvaluate,
-		Title:       "Evaluate checks",
-		Description: "Evaluate a unified diff or a Terraform or OpenTofu plan against the compiled checks with local engines. Returns verdicts and SARIF, and changes nothing.",
-		Annotations: readOnly,
-	}, handler(backend.Evaluate))
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolPropose,
-		Title:       "Propose a decision",
-		Description: "Record a proposed engineering decision for a person to review. It is not in force until a person approves it.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
-	}, handler(backend.Propose))
-	return server
-}
-
-// handler adapts a backend method. An error becomes a tool error the client can read.
-func handler[In, Out any](call func(context.Context, In) (Out, error)) mcp.ToolHandlerFor[In, Out] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
-		out, err := call(ctx, in)
-		return nil, out, err
-	}
 }

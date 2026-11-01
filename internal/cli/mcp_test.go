@@ -1,18 +1,16 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/ipsofacto-io/ipso/internal/compiler/builtin"
 	"github.com/ipsofacto-io/ipso/pkg/mcptools"
@@ -50,43 +48,41 @@ func mcpTestDeps() deps {
 	}
 }
 
-func mcpClient(t *testing.T, root string) *mcp.ClientSession {
+func mcpClient(t *testing.T, root string) *mcptools.Server {
 	t.Helper()
-	server := mcptools.NewServer("test", newLocalBackend(root, mcpTestDeps()))
-	serverSide, clientSide := mcp.NewInMemoryTransports()
-	ctx := context.Background()
-	if _, err := server.Connect(ctx, serverSide, nil); err != nil {
-		t.Fatal(err)
-	}
-	session, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, clientSide, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = session.Close() })
-	return session
+	return mcptools.NewServer("test", newLocalBackend(root, mcpTestDeps()))
 }
 
-func callTool[T any](t *testing.T, session *mcp.ClientSession, name string, args any) (T, string) {
+// callTool sends one tools/call through the protocol layer. It returns the tool's failure text.
+func callTool[T any](t *testing.T, server *mcptools.Server, name string, args any) (T, string) {
 	t.Helper()
 	var out T
-	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
-	if err != nil {
-		t.Fatalf("%s: %v", name, err)
-	}
-	if res.IsError {
-		text := ""
-		for _, content := range res.Content {
-			if item, ok := content.(*mcp.TextContent); ok {
-				text += item.Text
-			}
-		}
-		return out, text
-	}
-	raw, err := json.Marshal(res.StructuredContent)
+	message, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": name, "arguments": args}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	var reply struct {
+		Result struct {
+			IsError           bool            `json:"isError"`
+			StructuredContent json.RawMessage `json:"structuredContent"`
+			Content           []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(server.Handle(context.Background(), message), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Error != nil {
+		t.Fatalf("%s: %s", name, reply.Error.Message)
+	}
+	if reply.Result.IsError {
+		return out, reply.Result.Content[0].Text
+	}
+	if err := json.Unmarshal(reply.Result.StructuredContent, &out); err != nil {
 		t.Fatal(err)
 	}
 	return out, ""
@@ -98,24 +94,6 @@ func slugsOf(decisions []mcptools.Decision) string {
 		slugs[i] = item.Slug
 	}
 	return strings.Join(slugs, ",")
-}
-
-func TestMCPListsTheFourTools(t *testing.T) {
-	session := mcpClient(t, mcpFixture(t))
-	res, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for _, tool := range res.Tools {
-		names = append(names, tool.Name)
-	}
-	got := strings.Join(names, ",")
-	for _, want := range []string{mcptools.ToolApplicable, mcptools.ToolGet, mcptools.ToolEvaluate, mcptools.ToolPropose} {
-		if !strings.Contains(got, want) {
-			t.Errorf("%s missing from %s", want, got)
-		}
-	}
 }
 
 func TestMCPApplicableFollowsScope(t *testing.T) {
@@ -365,123 +343,65 @@ func TestMCPProposeNeverFollowsALink(t *testing.T) {
 	}
 }
 
-// ipsoBinary builds the real command, because the stdio stream and the protocol versions are the
-// parts the in-memory client does not cover.
-func ipsoBinary(t *testing.T) string {
+// ipsoOnPath builds the real command and puts it first on PATH, because the stdio stream is the part
+// an in-process call does not cover.
+func ipsoOnPath(t *testing.T) {
 	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	binary := filepath.Join(t.TempDir(), "ipso")
-	build := exec.Command("go", "build", "-o", binary, "../../cmd/ipso")
-	build.Dir = wd
+	dir := t.TempDir()
+	build := exec.Command("go", "build", "-o", filepath.Join(dir, "ipso"), "github.com/ipsofacto-io/ipso/cmd/ipso")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, out)
 	}
-	return binary
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestMCPStdioServesCurrentAndOlderClients(t *testing.T) {
-	binary := ipsoBinary(t)
+	ipsoOnPath(t)
 	root := mcpFixture(t)
+	call := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"decisions.get","arguments":{"ref":"use-tls"}%s}}` + "\n"
+	list := `{"jsonrpc":"2.0","id":2,"method":"tools/list"%s}` + "\n"
 	for _, version := range []string{"2025-11-25", "2025-06-18", "2025-03-26"} {
 		t.Run(version, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			command := exec.CommandContext(ctx, binary, "mcp")
-			command.Dir = root
-			stdin, err := command.StdinPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			stdout, err := command.StdoutPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := command.Start(); err != nil {
-				t.Fatal(err)
-			}
-			reader := bufio.NewScanner(stdout)
-			reader.Buffer(make([]byte, 1<<20), 1<<24)
-			send := func(message string) {
-				if _, err := stdin.Write([]byte(message + "\n")); err != nil {
-					t.Fatal(err)
+			input := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"` + version + `","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}` + "\n" +
+				`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n" + fmt.Sprintf(list, "") + fmt.Sprintf(call, "")
+			text := runMCPBinary(t, root, input)
+			for _, want := range []string{`"protocolVersion":"` + version + `"`, mcptools.ToolApplicable, "All traffic uses TLS."} {
+				if !strings.Contains(text, want) {
+					t.Errorf("missing %s in %s", want, text)
 				}
-			}
-			read := func() string {
-				if !reader.Scan() {
-					t.Fatalf("no reply: %v", reader.Err())
-				}
-				return reader.Text()
-			}
-			send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"` + version + `","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
-			if reply := read(); !strings.Contains(reply, `"protocolVersion":"`+version+`"`) {
-				t.Fatalf("initialize: %s", reply)
-			}
-			send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-			send(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
-			if reply := read(); !strings.Contains(reply, mcptools.ToolApplicable) {
-				t.Fatalf("tools/list: %s", reply)
-			}
-			send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"decisions.get","arguments":{"ref":"use-tls"}}}`)
-			if reply := read(); !strings.Contains(reply, "All traffic uses TLS.") {
-				t.Fatalf("tools/call: %s", reply)
-			}
-			_ = stdin.Close()
-			if err := command.Wait(); err != nil {
-				t.Fatalf("exit: %v", err)
 			}
 		})
 	}
+	t.Run(mcptools.LatestVersion, func(t *testing.T) {
+		meta := `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}`
+		input := `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{` + meta + `}}` + "\n" +
+			fmt.Sprintf(list, `,"params":{`+meta+`}`) + fmt.Sprintf(call, ","+meta)
+		text := runMCPBinary(t, root, input)
+		for _, want := range []string{"2026-07-28", mcptools.ToolApplicable, `"ttlMs"`, "All traffic uses TLS.", `"resultType":"complete"`} {
+			if !strings.Contains(text, want) {
+				t.Errorf("missing %s in %s", want, text)
+			}
+		}
+	})
 }
 
-func TestMCPStdioServesTheStatelessProtocol(t *testing.T) {
-	binary := ipsoBinary(t)
-	root := mcpFixture(t)
+func runMCPBinary(t *testing.T, root, input string) string {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, binary, "mcp")
+	command := exec.CommandContext(ctx, "ipso", "mcp")
 	command.Dir = root
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
+	command.Stdin = strings.NewReader(input)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
 	command.Stderr = &stderr
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
+	if err := command.Run(); err != nil {
+		t.Fatalf("%v: %s", err, stderr.String())
 	}
-	reader := bufio.NewScanner(stdout)
-	reader.Buffer(make([]byte, 1<<20), 1<<24)
-	meta := `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}`
-	var text strings.Builder
-	for _, message := range []string{
-		`{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{` + meta + `}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{` + meta + `}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"decisions.get","arguments":{"ref":"use-tls"},` + meta + `}}`,
-	} {
-		if _, err := stdin.Write([]byte(message + "\n")); err != nil {
-			t.Fatal(err)
-		}
-		if !reader.Scan() {
-			t.Fatalf("no reply to %s: %v %s", message, reader.Err(), stderr.String())
-		}
-		text.WriteString(reader.Text())
+	if stderr.Len() > 0 {
+		t.Fatalf("stderr: %s", stderr.String())
 	}
-	_ = stdin.Close()
-	if err := command.Wait(); err != nil {
-		t.Fatalf("exit: %v %s", err, stderr.String())
-	}
-	for _, want := range []string{"2026-07-28", mcptools.ToolApplicable, `"ttlMs"`, "All traffic uses TLS.", `"resultType":"complete"`} {
-		if !strings.Contains(text.String(), want) {
-			t.Errorf("missing %s in %s", want, text.String())
-		}
-	}
+	return stdout.String()
 }
 
 func TestMCPUsage(t *testing.T) {

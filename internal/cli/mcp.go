@@ -7,14 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/ipsofacto-io/ipso/internal/compiler"
 	"github.com/ipsofacto-io/ipso/internal/config"
@@ -29,15 +25,13 @@ const mcpUsage = "usage: ipso mcp"
 
 // mcpCmd serves the MCP tools over stdio for one checkout until the client closes the stream.
 // Stdout carries the protocol, so nothing else may write to it.
-func mcpCmd(root string, args []string, stderr io.Writer, d deps) int {
+func mcpCmd(root string, args []string, stdin io.Reader, stdout, stderr io.Writer, d deps) int {
 	if len(args) != 0 {
 		fprintln(stderr, mcpUsage)
 		return 2
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	server := mcptools.NewServer(Version, newLocalBackend(root, d))
-	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) {
+	if err := server.ServeStdio(context.Background(), stdin, stdout); err != nil {
 		fprintln(stderr, err)
 		return 1
 	}

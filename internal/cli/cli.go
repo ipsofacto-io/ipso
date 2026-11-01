@@ -96,7 +96,7 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 	case "rules":
 		return rulesCmd(root, args[1:], stdout, stderr, d)
 	case "mcp":
-		return mcpCmd(root, args[1:], stderr, d)
+		return mcpCmd(root, args[1:], os.Stdin, stdout, stderr, d)
 	case "-h", "--help", "help", "version", "--version", "-v":
 		fprintln(stdout, helpText())
 		return 0
