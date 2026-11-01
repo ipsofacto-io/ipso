@@ -9,7 +9,7 @@ CLI, check compilers, agent hooks and local MCP server that turn engineering dec
 
 This is the Apache-2.0 adoption surface for ipso. One Go workspace will hold the EDR library, the check compilers, the connector SDK, the compiler plugin SDK, policy bundles, the CLI, agent hooks, the local MCP server, rules-file generators and the documentation site.
 
-Module rule: this module does not require `ipso-server`. `pkg/edrcheck` is its one public package, so that the server can validate EDR files the same way `ipso check` does. Everything else stays internal. The EDR JSON Schema is embedded from `edr-spec` so `ipso check` stays offline. `ipso premise check` is the command that fetches a premise URL.
+Module rule: this module does not require `ipso-server`. It has two public packages. `pkg/edrcheck` lets the server validate EDR files the same way `ipso check` does, and `pkg/plancheck` lets the server evaluate a plan against a signed bundle the same way `ipso check plan --bundle` does. Everything else stays internal. The EDR JSON Schema is embedded from `edr-spec` so `ipso check` stays offline. `ipso premise check` is the command that fetches a premise URL.
 
 ## Install
 
