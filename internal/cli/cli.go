@@ -1244,51 +1244,29 @@ func sameOutput(report, sarifPath string) bool {
 }
 
 func verdictOf(stdout io.Writer, entry compiler.Entry, outcome compiler.Outcome) (compiler.Verdict, bool) {
-	verdict := compiler.Verdict{
-		DecisionID: entry.DecisionID,
-		Slug:       entry.Slug,
-		CheckIndex: entry.CheckIndex,
-		Mode:       entry.Mode,
-		Result:     "pass",
-	}
-	switch {
-	case outcome.Err != nil:
-		verdict.Result = "error"
+	verdict, hard := compiler.Judge(entry, outcome)
+	switch verdict.Result {
+	case "error":
 		fprintf(stdout, "%s: checks[%d] (%s): error: %s\n", entry.Slug, entry.CheckIndex, entry.Mode, outcome.Err)
-		return verdict, true
-	case len(outcome.Violations) > 0 && outcome.Waived:
-		verdict.Result = "waived"
-		verdict.Violations = len(outcome.Violations)
-		fprintf(stdout, "%s: checks[%d] (%s): waived\n", entry.Slug, entry.CheckIndex, entry.Mode)
-		return verdict, false
-	case len(outcome.Violations) > 0:
-		covered := 0
-		for _, violation := range outcome.Violations {
-			if violation.Baselined {
-				covered++
-			}
+	case "waived":
+		if outcome.Waived {
+			fprintf(stdout, "%s: checks[%d] (%s): waived\n", entry.Slug, entry.CheckIndex, entry.Mode)
+		} else {
+			fprintf(stdout, "%s: checks[%d] (%s): waived (baseline: %d)\n", entry.Slug, entry.CheckIndex, entry.Mode, verdict.Violations)
 		}
-		if covered == len(outcome.Violations) {
-			verdict.Result = "waived"
-			verdict.Violations = covered
-			fprintf(stdout, "%s: checks[%d] (%s): waived (baseline: %d)\n", entry.Slug, entry.CheckIndex, entry.Mode, covered)
-			return verdict, false
-		}
-		verdict.Result = "fail"
-		verdict.Violations = len(outcome.Violations) - covered
+	case "fail":
 		for _, violation := range outcome.Violations {
 			if !violation.Baselined {
 				fprintf(stdout, "%s: checks[%d] (%s): %s\n", entry.Slug, entry.CheckIndex, entry.Mode, violationLine(violation))
 			}
 		}
-		if covered > 0 {
+		if covered := outcome.Baselined(); covered > 0 {
 			fprintf(stdout, "%s: checks[%d] (%s): baselined: %d\n", entry.Slug, entry.CheckIndex, entry.Mode, covered)
 		}
-		return verdict, entry.Mode == "block"
 	default:
 		fprintf(stdout, "%s: checks[%d] (%s): pass\n", entry.Slug, entry.CheckIndex, entry.Mode)
-		return verdict, false
 	}
+	return verdict, hard
 }
 
 func violationLine(violation compiler.Violation) string {
