@@ -1,0 +1,191 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ipso",
+          "version": "1.2.3",
+          "informationUri": "https://github.com/ipsofacto-io/ipso",
+          "rules": [
+            {
+              "id": "01HZZZZZZZZZZZZZZZZZZZZZZZ/0",
+              "name": "tls-on-ingress",
+              "shortDescription": {
+                "text": "Public ingress must terminate TLS"
+              },
+              "fullDescription": {
+                "text": "Decision 01HZZZZZZZZZZZZZZZZZZZZZZZ, check 0: Public ingress must terminate TLS"
+              },
+              "help": {
+                "text": "Public ingress must terminate TLS\n\nDecision file: docs/decisions/tls.md\n\nRun: ipso explain tls-on-ingress",
+                "markdown": "**Public ingress must terminate TLS**\n\nDecision file: docs/decisions/tls\\.md\n\nRun `ipso explain tls-on-ingress` for the decision text and its links."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "ipso",
+                  "decision"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "automationDetails": {
+        "id": "ipso/semgrep/"
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "01HZZZZZZZZZZZZZZZZZZZZZZZ/0",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {
+            "text": "Public ingress must terminate TLS: check 0 reported a violation here. See the [decision](1)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 3,
+                  "endLine": 2,
+                  "endColumn": 9
+                }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "id": 1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/decisions/tls.md",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 2
+                }
+              },
+              "message": {
+                "text": "Decision record"
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "fc25d40005da103328d38ae72ed9a138:1"
+          }
+        },
+        {
+          "ruleId": "01HZZZZZZZZZZZZZZZZZZZZZZZ/0",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {
+            "text": "Public ingress must terminate TLS: check 0 reported a violation here. See the [decision](1)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 7,
+                  "startColumn": 3,
+                  "endLine": 7,
+                  "endColumn": 9
+                }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "id": 1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/decisions/tls.md",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 2
+                }
+              },
+              "message": {
+                "text": "Decision record"
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "fc25d40005da103328d38ae72ed9a138:2"
+          }
+        },
+        {
+          "ruleId": "01HZZZZZZZZZZZZZZZZZZZZZZZ/0",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {
+            "text": "Public ingress must terminate TLS: check 0 reported a violation here. See the [decision](1)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/b%20file.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 3,
+                  "endLine": 9,
+                  "endColumn": 9
+                }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "id": 1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/decisions/tls.md",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 2
+                }
+              },
+              "message": {
+                "text": "Decision record"
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "05d4aefdd2876878b851cb5cb57bfcf4:1"
+          }
+        }
+      ]
+    }
+  ]
+}

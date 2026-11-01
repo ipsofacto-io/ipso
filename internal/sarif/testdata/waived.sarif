@@ -1,0 +1,103 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ipso",
+          "version": "1.2.3",
+          "informationUri": "https://github.com/ipsofacto-io/ipso",
+          "rules": [
+            {
+              "id": "01HZZZZZZZZZZZZZZZZZZZZZZZ/0",
+              "name": "tls-on-ingress",
+              "shortDescription": {
+                "text": "Public ingress must terminate TLS"
+              },
+              "fullDescription": {
+                "text": "Decision 01HZZZZZZZZZZZZZZZZZZZZZZZ, check 0: Public ingress must terminate TLS"
+              },
+              "help": {
+                "text": "Public ingress must terminate TLS\n\nDecision file: docs/decisions/tls.md\n\nRun: ipso explain tls-on-ingress",
+                "markdown": "**Public ingress must terminate TLS**\n\nDecision file: docs/decisions/tls\\.md\n\nRun `ipso explain tls-on-ingress` for the decision text and its links."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "tags": [
+                  "ipso",
+                  "decision"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "automationDetails": {
+        "id": "ipso/semgrep/"
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "01HZZZZZZZZZZZZZZZZZZZZZZZ/0",
+          "ruleIndex": 0,
+          "level": "note",
+          "message": {
+            "text": "Waived: Public ingress must terminate TLS: check 0 failed with 2 violations. See the [decision](1)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/decisions/tls.md",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 2
+                }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "id": 1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/decisions/tls.md",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 2
+                }
+              },
+              "message": {
+                "text": "Decision record"
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "b8ed9d3839240be6049bf63ce8f7d101:1"
+          },
+          "suppressions": [
+            {
+              "kind": "external",
+              "justification": "A waiver on the decision is in force."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

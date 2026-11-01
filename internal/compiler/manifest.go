@@ -13,10 +13,13 @@ import (
 	"github.com/ipsofacto-io/ipso/internal/edr"
 )
 
-// Entry is one compiled check in the manifest. The framework fills every field.
+// Entry is one compiled check in the manifest. The framework fills every field
+// except Path and Title, which ipso compile stamps from the file it read.
 type Entry struct {
 	DecisionID      string             `json:"decision_id"`
 	Slug            string             `json:"slug"`
+	Path            string             `json:"path,omitempty"`
+	Title           string             `json:"title,omitempty"`
 	CheckIndex      int                `json:"check_index"`
 	Engine          string             `json:"engine"`
 	Mode            string             `json:"mode"`
