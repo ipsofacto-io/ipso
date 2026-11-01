@@ -17,8 +17,10 @@ type Check struct {
 
 // ScopeItem is one object from the scope array.
 // An empty Env means the item applies in every environment.
+// An empty Paths means the item applies to the whole repository.
 type ScopeItem struct {
-	Env []string
+	Env   []string
+	Paths []string
 }
 
 // Waiver is one object from the waivers array.
@@ -51,6 +53,7 @@ type Record struct {
 	ValidFrom   time.Time
 	ValidTo     *time.Time
 	Scope       []ScopeItem
+	Tags        []string
 	Checks      []Check
 	Waivers     []Waiver
 	Premises    []Premise
@@ -98,6 +101,10 @@ func RecordFrom(doc Document) (Record, error) {
 	rec.Scope, err = scopeFrom(doc.Front["scope"])
 	if err != nil {
 		return Record{}, err
+	}
+	rec.Tags, err = stringList(doc.Front["tags"])
+	if err != nil {
+		return Record{}, fmt.Errorf("tags: %w", err)
 	}
 	rec.Checks, err = checksFrom(doc.Front["checks"])
 	if err != nil {
@@ -200,7 +207,11 @@ func scopeFrom(raw any) ([]ScopeItem, error) {
 		if err != nil {
 			return nil, fmt.Errorf("scope[%d]: env: %w", i, err)
 		}
-		scope = append(scope, ScopeItem{Env: envs})
+		paths, err := stringList(mapping["paths"])
+		if err != nil {
+			return nil, fmt.Errorf("scope[%d]: paths: %w", i, err)
+		}
+		scope = append(scope, ScopeItem{Env: envs, Paths: paths})
 	}
 	return scope, nil
 }

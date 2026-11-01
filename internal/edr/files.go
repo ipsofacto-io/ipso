@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Match lists files under root whose slash-separated path matches one pattern.
@@ -80,4 +81,57 @@ func ReadFile(path string) (Document, error) {
 		return Document{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return doc, nil
+}
+
+// Loaded is one valid decision file. Shown is its slash-separated path from the root.
+type Loaded struct {
+	Shown string
+	Doc   Document
+	Rec   Record
+}
+
+// LoadInForce reads every file that matches a pattern and returns the records in force on the
+// calendar date of now. Any file that does not read, validate, and decode is a problem, as are
+// two records in force with one id. Problems are lines of the form "<path>: <problem>". A caller
+// that acts on the decisions stops on any problem, so it never reflects part of them.
+func LoadInForce(root string, patterns []string, now time.Time) ([]Loaded, []string, error) {
+	files, err := Match(root, patterns)
+	if err != nil {
+		return nil, nil, err
+	}
+	var loaded []Loaded
+	var problems []string
+	seen := map[string]string{}
+	for _, file := range files {
+		shown := file
+		if rel, err := filepath.Rel(root, file); err == nil {
+			shown = filepath.ToSlash(rel)
+		}
+		doc, err := ReadFile(file)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %s", shown, err))
+			continue
+		}
+		if found := Validate(doc); len(found) > 0 {
+			for _, problem := range found {
+				problems = append(problems, fmt.Sprintf("%s: %s", shown, problem))
+			}
+			continue
+		}
+		rec, err := RecordFrom(doc)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %s", shown, err))
+			continue
+		}
+		if !rec.InForce(now) {
+			continue
+		}
+		if prev, ok := seen[rec.ID]; ok {
+			problems = append(problems, fmt.Sprintf("%s: duplicate-id: %s", shown, prev))
+			continue
+		}
+		seen[rec.ID] = shown
+		loaded = append(loaded, Loaded{Shown: shown, Doc: doc, Rec: rec})
+	}
+	return loaded, problems, nil
 }
