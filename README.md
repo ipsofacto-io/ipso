@@ -45,6 +45,10 @@ ipso explain <slug>
 
 A server-side Atlantis workflow runs `ipso check plan` in the plan stage and removes the plan file on a failed verdict, so `atlantis apply` has nothing to apply. [docs/atlantis.md](docs/atlantis.md) has the workflow.
 
+## Spacelift, env0, and Scalr
+
+A hook on the platform's worker runs `ipso check plan` against the run's own plan, and a non-zero exit stops the run. [docs/platforms.md](docs/platforms.md) has the hook for each platform and what still has to be validated on it.
+
 ## Secure use
 
 - `ipso check`, `ipso explain`, `ipso compile`, `ipso check plan`, `ipso check ci`, `ipso check checkov`, `ipso check pulumi`, `ipso check cloudformation`, and `ipso check arm` run offline. They read local files that match the config globs and do not call a network service. `ipso premise check` performs the public HTTPS GET from ADR-0053. It sends no Authorization header and no cookies, refuses an IP literal, a private address, and a redirect, and it does not edit the EDR.
