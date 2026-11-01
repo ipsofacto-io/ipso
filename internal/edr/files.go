@@ -90,18 +90,15 @@ type Loaded struct {
 	Rec   Record
 }
 
-// LoadInForce reads every file that matches a pattern and returns the records in force on the
-// calendar date of now. Any file that does not read, validate, and decode is a problem, as are
-// two records in force with one id. Problems are lines of the form "<path>: <problem>". A caller
-// that acts on the decisions stops on any problem, so it never reflects part of them.
-func LoadInForce(root string, patterns []string, now time.Time) ([]Loaded, []string, error) {
+// Load reads every file that matches a pattern. A file that does not read, validate, and decode is
+// a problem, a line of the form "<path>: <problem>".
+func Load(root string, patterns []string) ([]Loaded, []string, error) {
 	files, err := Match(root, patterns)
 	if err != nil {
 		return nil, nil, err
 	}
 	var loaded []Loaded
 	var problems []string
-	seen := map[string]string{}
 	for _, file := range files {
 		shown := file
 		if rel, err := filepath.Rel(root, file); err == nil {
@@ -123,15 +120,31 @@ func LoadInForce(root string, patterns []string, now time.Time) ([]Loaded, []str
 			problems = append(problems, fmt.Sprintf("%s: %s", shown, err))
 			continue
 		}
-		if !rec.InForce(now) {
-			continue
-		}
-		if prev, ok := seen[rec.ID]; ok {
-			problems = append(problems, fmt.Sprintf("%s: duplicate-id: %s", shown, prev))
-			continue
-		}
-		seen[rec.ID] = shown
 		loaded = append(loaded, Loaded{Shown: shown, Doc: doc, Rec: rec})
+	}
+	return loaded, problems, nil
+}
+
+// LoadInForce returns the records in force on the calendar date of now. Two records in force with
+// one id are a problem too. A caller that acts on the decisions stops on any problem, so it never
+// reflects part of them.
+func LoadInForce(root string, patterns []string, now time.Time) ([]Loaded, []string, error) {
+	all, problems, err := Load(root, patterns)
+	if err != nil {
+		return nil, nil, err
+	}
+	var loaded []Loaded
+	seen := map[string]string{}
+	for _, item := range all {
+		if !item.Rec.InForce(now) {
+			continue
+		}
+		if prev, ok := seen[item.Rec.ID]; ok {
+			problems = append(problems, fmt.Sprintf("%s: duplicate-id: %s", item.Shown, prev))
+			continue
+		}
+		seen[item.Rec.ID] = item.Shown
+		loaded = append(loaded, item)
 	}
 	return loaded, problems, nil
 }

@@ -88,7 +88,9 @@ type importedRecord struct {
 }
 
 type scopeItem struct {
-	Org string `yaml:"org"`
+	Org   string   `yaml:"org,omitempty"`
+	Paths []string `yaml:"paths,omitempty"`
+	Env   []string `yaml:"env,omitempty"`
 }
 
 type sourceItem struct {

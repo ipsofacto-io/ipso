@@ -12,6 +12,9 @@
       "env": [
         "prod"
       ],
+      "paths": [
+        "terraform/**"
+      ],
       "waivers": [],
       "compiler": "ci-binding",
       "compiler_version": "1",
