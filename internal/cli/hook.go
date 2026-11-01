@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	hookUsage = "usage: ipso hook claude-code [--bundle dir --digest sha256:hex --key public.pem]"
+	hookUsage = "usage: ipso hook claude-code|codex|copilot|cursor|kiro [event] [--bundle dir --digest sha256:hex --key public.pem]"
 	// maxHookInput bounds the event an agent sends. A Write event carries the whole file.
 	maxHookInput = 64 << 20
 	// maxHookFile is the largest file the hook reads to work out the content after an edit.
@@ -50,13 +50,28 @@ type hookOptions struct {
 }
 
 // hookCmd answers one agent event from stdin. An unexpected failure asks a person rather than
-// failing open or stopping all work. Exit 0 is the rule, because the answer is on stdout.
+// failing open or stopping all work. The answer is on stdout, or in the exit code for an agent that
+// has no other way to refuse.
 func hookCmd(args []string, stdin io.Reader, stdout, stderr io.Writer, d deps) int {
-	if len(args) == 0 || args[0] != "claude-code" {
+	if len(args) == 0 {
 		fprintln(stderr, hookUsage)
 		return 2
 	}
-	opts, err := parseHookArgs(args[1:], os.Getenv)
+	agent, ok := hookAgents[args[0]]
+	if !ok {
+		fprintln(stderr, hookUsage)
+		return 2
+	}
+	rest := args[1:]
+	named := ""
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		named, rest = rest[0], rest[1:]
+	}
+	getenv := func(string) string { return "" }
+	if args[0] == "claude-code" {
+		getenv = os.Getenv
+	}
+	opts, err := parseHookArgs(rest, getenv)
 	if err != nil {
 		fprintln(stderr, err)
 		return 2
@@ -68,27 +83,35 @@ func hookCmd(args []string, stdin io.Reader, stdout, stderr io.Writer, d deps) i
 	if err == nil && len(raw) > maxHookInput {
 		err = errors.New("the hook event is too large")
 	}
-	var event claudeEvent
+	var event agentEvent
 	if err == nil {
-		err = json.Unmarshal(raw, &event)
+		event, err = decodeAgentEvent(raw, named)
 	}
 	if err != nil {
-		writeClaudeAsk(stdout, "ipso: could not read the hook event: "+compiler.EscapeControls(err.Error()))
-		return 0
+		return agent.tool(stdout, stderr, event, hook.Decision{Action: hook.Ask, Reason: "ipso: could not read the hook event: " + compiler.EscapeControls(err.Error())})
 	}
-	switch event.HookEventName {
-	case "PreToolUse":
-		answerPreToolUse(event, opts, stdout, d)
-	case "Stop":
-		answerStop(event, opts, stdout, d)
-	case "SessionStart":
-		answerSessionStart(event, opts, stdout, d)
+	switch event.kind {
+	case eventTool:
+		return agent.tool(stdout, stderr, event, editDecision(event, opts, d))
+	case eventStop:
+		root, ok := hookRoot(event.cwd)
+		if !ok {
+			return agent.stop(stdout, stderr, event, nil, nil)
+		}
+		violations, notes := fullCheck(root, opts, d)
+		return agent.stop(stdout, stderr, event, violations, notes)
+	case eventSession:
+		root, ok := hookRoot(event.cwd)
+		if !ok {
+			return agent.session(stdout, "")
+		}
+		return agent.session(stdout, sessionText(root, opts, d))
 	}
 	return 0
 }
 
-// parseHookArgs takes the bundle from flags, or from the plugin's options, which Claude Code exports
-// to hook processes. An agent's shell tool cannot set the environment of a hook.
+// parseHookArgs takes the bundle from flags, or from the options Claude Code exports to a plugin's
+// hook processes. An agent's shell tool cannot set the environment of a hook.
 func parseHookArgs(args []string, getenv func(string) string) (hookOptions, error) {
 	opts := hookOptions{
 		bundle: getenv("CLAUDE_PLUGIN_OPTION_BUNDLE_DIR"),
@@ -125,16 +148,6 @@ func (o hookOptions) load(root string) (compiler.Build, error) {
 	return compiler.LoadBuild(root)
 }
 
-// claudeEvent is the part of a Claude Code hook event that ipso reads.
-type claudeEvent struct {
-	HookEventName  string          `json:"hook_event_name"`
-	Cwd            string          `json:"cwd"`
-	ToolName       string          `json:"tool_name"`
-	ToolInput      json.RawMessage `json:"tool_input"`
-	StopHookActive bool            `json:"stop_hook_active"`
-	Source         string          `json:"source"`
-}
-
 // hookRoot is the nearest directory above dir with ipso config. false means this is not an ipso
 // repository, and the hook has no opinion.
 func hookRoot(dir string) (string, bool) {
@@ -156,139 +169,115 @@ func hookRoot(dir string) (string, bool) {
 	}
 }
 
-func answerPreToolUse(event claudeEvent, opts hookOptions, stdout io.Writer, d deps) {
-	root, ok := hookRoot(event.Cwd)
+// editDecision is the one answer every agent gets for a proposed edit.
+func editDecision(event agentEvent, opts hookOptions, d deps) hook.Decision {
+	root, ok := hookRoot(event.cwd)
 	if !ok {
-		return
+		return hook.Decision{}
 	}
 	cfg, _, err := config.Load(root)
 	if err != nil {
-		writeClaudeAsk(stdout, "ipso: could not read the config: "+compiler.EscapeControls(err.Error()))
-		return
+		return askAbout("could not read the config", err)
 	}
-	protection := hook.Protection{DecisionGlobs: cfg.Decisions}
-	proposals, protected, err := claudeProposals(root, event, protection)
+	proposals, protected, err := toolProposals(root, event, hook.Protection{DecisionGlobs: cfg.Decisions})
 	if err != nil {
-		writeClaudeAsk(stdout, "ipso: could not read the edit: "+compiler.EscapeControls(err.Error()))
-		return
+		return askAbout("could not read the edit", err)
 	}
 	if protected {
-		writeClaudeAsk(stdout, hook.ProtectedReason)
-		return
+		return hook.Decision{Action: hook.Ask, Reason: hook.ProtectedReason}
 	}
 	if len(proposals) == 0 {
-		return
+		return hook.Decision{}
 	}
 	build, err := opts.load(root)
 	if err != nil {
-		writeClaudeAsk(stdout, "ipso: the checks could not be loaded, so this edit was not checked: "+compiler.EscapeControls(err.Error())+". Run ipso compile.")
-		return
+		return hook.Decision{Action: hook.Ask, Reason: "ipso: the checks could not be loaded, so this edit was not checked: " + compiler.EscapeControls(err.Error()) + ". Run ipso compile."}
 	}
 	decision, err := hook.Evaluate(build, proposals, d.now())
 	if err != nil {
-		writeClaudeAsk(stdout, "ipso: the checks could not be read: "+compiler.EscapeControls(err.Error()))
-		return
+		return askAbout("the checks could not be read", err)
 	}
-	switch decision.Action {
-	case hook.Deny:
-		writeClaudeDecision(stdout, "deny", decision.Reason, decision.Note)
-	case hook.Ask:
-		writeClaudeDecision(stdout, "ask", decision.Reason, decision.Note)
-	default:
-		if decision.Note != "" {
-			writeJSON(stdout, map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PreToolUse", "additionalContext": decision.Note}})
-		}
-	}
+	return decision
 }
 
-// claudeProposals turns one tool call into proposed edits. A tool that edits nothing, or a path
-// outside the repository, gives no proposal.
-func claudeProposals(root string, event claudeEvent, protection hook.Protection) ([]edit.Proposal, bool, error) {
-	var input struct {
-		FilePath     string `json:"file_path"`
-		NotebookPath string `json:"notebook_path"`
-		Content      string `json:"content"`
-		OldString    string `json:"old_string"`
-		NewString    string `json:"new_string"`
-		NewSource    string `json:"new_source"`
-		ReplaceAll   bool   `json:"replace_all"`
-		Command      string `json:"command"`
-		Edits        []struct {
-			OldString  string `json:"old_string"`
-			NewString  string `json:"new_string"`
-			ReplaceAll bool   `json:"replace_all"`
-		} `json:"edits"`
-	}
-	switch event.ToolName {
-	case "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash":
-	default:
-		return nil, false, nil
-	}
-	if len(event.ToolInput) > 0 {
-		if err := json.Unmarshal(event.ToolInput, &input); err != nil {
-			return nil, false, err
-		}
-	}
-	if event.ToolName == "Bash" {
-		if input.Command == "" {
-			return nil, false, nil
-		}
-		if protection.CommandTouchesProtected(input.Command) {
+func askAbout(what string, err error) hook.Decision {
+	return hook.Decision{Action: hook.Ask, Reason: "ipso: " + what + ": " + compiler.EscapeControls(err.Error())}
+}
+
+// toolProposals turns one tool call into proposed edits. A tool that edits nothing, or a path
+// outside the repository, gives no proposal. The second result says a protected path is involved.
+func toolProposals(root string, event agentEvent, protection hook.Protection) ([]edit.Proposal, bool, error) {
+	call := classifyTool(event.tool, event.input)
+	if call.shell != "" {
+		if protection.CommandTouchesProtected(call.shell) {
 			return nil, true, nil
 		}
-		return []edit.Proposal{{Tool: "shell", Command: input.Command}}, false, nil
+		return []edit.Proposal{{Tool: "shell", Command: call.shell}}, false, nil
 	}
-
-	target := input.FilePath
-	if event.ToolName == "NotebookEdit" {
-		target = input.NotebookPath
+	relative := func(name string) (string, bool) {
+		if !filepath.IsAbs(name) && event.cwd != "" {
+			name = filepath.Join(event.cwd, name)
+		}
+		rel, err := repoRelative(root, resolveEditTarget(name))
+		return rel, err == nil
 	}
-	if target == "" {
+	if call.patch != "" {
+		parsed, err := edit.FromCodexPatch(func(name string) string {
+			rel, ok := relative(name)
+			if !ok {
+				return ""
+			}
+			return readForEdit(root, rel)
+		}, call.patch)
+		if err != nil {
+			return nil, false, err
+		}
+		var proposals []edit.Proposal
+		for _, proposal := range parsed {
+			rel, ok := relative(proposal.Path)
+			if !ok {
+				continue
+			}
+			if protection.Protected(rel) {
+				return nil, true, nil
+			}
+			proposal.Path = rel
+			proposals = append(proposals, proposal)
+		}
+		return proposals, false, nil
+	}
+	if call.path == "" {
 		return nil, false, nil
 	}
-	if !filepath.IsAbs(target) && event.Cwd != "" {
-		target = filepath.Join(event.Cwd, target)
-	}
-	rel, err := repoRelative(root, resolveEditTarget(target))
-	if err != nil {
+	rel, ok := relative(call.path)
+	if !ok {
 		return nil, false, nil
 	}
 	if protection.Protected(rel) {
 		return nil, true, nil
 	}
-	proposal := edit.Proposal{Path: rel}
-	switch event.ToolName {
-	case "Write":
-		proposal.Tool = "write"
-		proposal.Content = input.Content
-		proposal.Added = input.Content
-	case "NotebookEdit":
-		proposal.Tool = "notebook"
-		proposal.Content = input.NewSource
-		proposal.Added = input.NewSource
-	default:
-		proposal.Tool = "edit"
+	proposal := edit.Proposal{Path: rel, Tool: call.kind}
+	switch {
+	case call.kind == "delete":
+	case call.replaces:
 		current := readForEdit(root, rel)
-		apply := func(oldText, newText string, all bool) {
+		for _, item := range call.edits {
 			count := 1
-			if all {
+			if item.all {
 				count = -1
 			}
 			// An empty old text would match between every character.
-			if oldText == "" {
-				current += newText
+			if item.old == "" {
+				current += item.new
 			} else {
-				current = strings.Replace(current, oldText, newText, count)
+				current = strings.Replace(current, item.old, item.new, count)
 			}
-			proposal.Added = strings.TrimPrefix(proposal.Added+"\n"+newText, "\n")
-		}
-		if event.ToolName == "Edit" {
-			apply(input.OldString, input.NewString, input.ReplaceAll)
-		}
-		for _, item := range input.Edits {
-			apply(item.OldString, item.NewString, item.ReplaceAll)
+			proposal.Added = strings.TrimPrefix(proposal.Added+"\n"+item.new, "\n")
 		}
 		proposal.Content = current
+	default:
+		proposal.Content = call.content
+		proposal.Added = call.content
 	}
 	return []edit.Proposal{proposal}, false, nil
 }
@@ -322,26 +311,6 @@ func readForEdit(root, rel string) string {
 		return ""
 	}
 	return string(data)
-}
-
-// answerStop runs the checks a hook can run on the working tree and gives blocking violations back
-// to the agent to fix. When the agent is already continuing from this hook, it reports and lets the
-// session end, so the two cannot loop. CI remains the gate.
-func answerStop(event claudeEvent, opts hookOptions, stdout io.Writer, d deps) {
-	root, ok := hookRoot(event.Cwd)
-	if !ok {
-		return
-	}
-	violations, notes := fullCheck(root, opts, d)
-	switch {
-	case len(violations) == 0 && len(notes) == 0:
-	case len(violations) == 0:
-		writeJSON(stdout, map[string]any{"systemMessage": "ipso: " + strings.Join(notes, "\n")})
-	case event.StopHookActive:
-		writeJSON(stdout, map[string]any{"systemMessage": "ipso: violations remain and CI will report them.\n" + strings.Join(violations, "\n")})
-	default:
-		writeJSON(stdout, map[string]any{"decision": "block", "reason": "ipso: the working tree violates decisions in force. Fix these, or use the decisions.propose tool to change a decision.\n" + strings.Join(append(violations, notes...), "\n")})
-	}
 }
 
 // fullCheck returns blocking violations and notes about what could not run. A missing engine is a
@@ -486,13 +455,9 @@ func changedProposals(root string) ([]edit.Proposal, error) {
 	return proposals, nil
 }
 
-// answerSessionStart refreshes the local build, which git ignores, so a fresh clone has checks to
-// evaluate. It then states the decisions in force. A signed bundle is never replaced.
-func answerSessionStart(event claudeEvent, opts hookOptions, stdout io.Writer, d deps) {
-	root, ok := hookRoot(event.Cwd)
-	if !ok {
-		return
-	}
+// sessionText refreshes the local build, which git ignores, so a fresh clone has checks to evaluate.
+// It then states the decisions in force. A signed bundle is never replaced.
+func sessionText(root string, opts hookOptions, d deps) string {
 	var notes []string
 	if opts.bundle == "" {
 		var out, errOut bytes.Buffer
@@ -504,9 +469,7 @@ func answerSessionStart(event claudeEvent, opts hookOptions, stdout io.Writer, d
 	}
 	cfg, _, err := config.Load(root)
 	if err != nil {
-		notes = append(notes, compiler.EscapeControls(err.Error()))
-		writeClaudeContext(stdout, strings.Join(notes, "\n"))
-		return
+		return strings.Join(append(notes, compiler.EscapeControls(err.Error())), "\n")
 	}
 	loaded, problems, err := edr.LoadInForce(root, cfg.Decisions, d.now())
 	if err != nil {
@@ -515,7 +478,7 @@ func answerSessionStart(event claudeEvent, opts hookOptions, stdout io.Writer, d
 	if len(problems) > 0 {
 		notes = append(notes, fmt.Sprintf("%d problems in decision files. Run ipso check.", len(problems)))
 	}
-	writeClaudeContext(stdout, sessionContext(loaded, notes))
+	return sessionContext(loaded, notes)
 }
 
 func sessionContext(loaded []edr.Loaded, notes []string) string {
@@ -551,25 +514,6 @@ func sessionContext(loaded []edr.Loaded, notes []string) string {
 		out.WriteString(note + "\n")
 	}
 	return out.String()
-}
-
-func writeClaudeContext(stdout io.Writer, text string) {
-	if text == "" {
-		return
-	}
-	writeJSON(stdout, map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "SessionStart", "additionalContext": text}})
-}
-
-func writeClaudeAsk(stdout io.Writer, reason string) {
-	writeClaudeDecision(stdout, "ask", reason, "")
-}
-
-func writeClaudeDecision(stdout io.Writer, decision, reason, note string) {
-	output := map[string]any{"hookEventName": "PreToolUse", "permissionDecision": decision, "permissionDecisionReason": reason}
-	if note != "" {
-		output["additionalContext"] = note
-	}
-	writeJSON(stdout, map[string]any{"hookSpecificOutput": output})
 }
 
 func writeJSON(stdout io.Writer, value any) {
