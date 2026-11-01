@@ -87,6 +87,8 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		return compileCmd(root, stdout, stderr, d)
 	case "bundle":
 		return bundleCmd(root, args[1:], stdout, stderr)
+	case "render":
+		return renderCmd(root, args[1:], stdout, stderr)
 	case "premise":
 		return premiseCmd(root, args[1:], stdout, stderr, d)
 	case "baseline":
@@ -133,6 +135,8 @@ usage:
   ipso bundle pack --layout dir
   ipso bundle sign --layout dir --key private.pem
   ipso bundle verify --layout dir --digest sha256:hex --key public.pem
+  ipso render helm <chart-dir> --out <dir> [--values file]... [--release name] [--namespace name] [--kube-version version]
+  ipso render kustomize <dir> --out <dir>
   ipso compile`
 
 func initCmd(root string, stdout, stderr io.Writer) int {
