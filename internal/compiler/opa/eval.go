@@ -60,6 +60,16 @@ func ReadPlan(r io.Reader) (Plan, error) {
 	return Plan{raw: raw, value: value}, nil
 }
 
+// NewInput builds an input the evaluator can query from a document an adapter wrote. The hash is of
+// source, the bytes the adapter read, so it agrees with sha256sum of that file.
+func NewInput(source, document []byte) (Plan, error) {
+	value, err := planValue(document)
+	if err != nil {
+		return Plan{}, &compiler.Error{Code: CodePlanFormat, Err: err}
+	}
+	return Plan{raw: source, value: value}, nil
+}
+
 func planValue(raw []byte) (ast.Value, error) {
 	var decoded any
 	if err := util.Unmarshal(raw, &decoded); err != nil {

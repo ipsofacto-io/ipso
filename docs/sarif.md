@@ -1,6 +1,6 @@
 # SARIF output
 
-Every engine check takes `--sarif <file>`: `plan`, `ci`, `checkov`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, and `eslint`. The file holds one SARIF 2.1.0 run. The contract is ADR-0058 in `ipsofacto-io/ipso-spec`, and ADR-0059 adds the input names to the category.
+Every engine check takes `--sarif <file>`: `plan`, `ci`, `checkov`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, and `eslint`. The file holds one SARIF 2.1.0 run. The contract is ADR-0058 in `ipsofacto-io/ipso-spec`, and ADR-0059 adds the input names to the category.
 
 ```bash
 ipso compile

@@ -11,7 +11,13 @@ import (
 	"github.com/ipsofacto-io/ipso/internal/sarif"
 )
 
-const baselineUsage = "usage: ipso baseline create|update <subcommand> <args>\nsubcommands: plan, checkov, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, eslint\nargs are those of ipso check. --env and --input name the input, and a check holds one baseline per input."
+const baselineUsage = "usage: ipso baseline create|update <subcommand> <args>\nsubcommands: plan, checkov, pulumi, cloudformation, arm, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, eslint\nargs are those of ipso check. --env and --input name the input, and a check holds one baseline per input."
+
+func adapterRunner(check adapterCheck) checkRunner {
+	return func(root string, args []string, stdout, stderr io.Writer, d deps) int {
+		return adapterCmd(root, args, check, stdout, stderr, d)
+	}
+}
 
 // capturedChecks receives the raw outcomes of one evaluation.
 type capturedChecks struct {
@@ -25,15 +31,18 @@ type checkRunner func(root string, args []string, stdout, stderr io.Writer, d de
 // baselineRunners lists the check commands a baseline can read. ipso check ci is absent, because a job
 // that did not succeed means a control did not run, and a baseline would switch that control off.
 var baselineRunners = map[string]checkRunner{
-	"plan":         planCmd,
-	"checkov":      checkovCmd,
-	"depcruise":    depcruiseCmd,
-	"semgrep":      semgrepCmd,
-	"archunit":     archunitCmd,
-	"importlinter": importlinterCmd,
-	"kyverno":      kyvernoCmd,
-	"gatekeeper":   gatekeeperCmd,
-	"eslint":       eslintCmd,
+	"plan":           planCmd,
+	"checkov":        checkovCmd,
+	"pulumi":         adapterRunner(pulumiCheck),
+	"cloudformation": adapterRunner(cloudformationCheck),
+	"arm":            adapterRunner(armCheck),
+	"depcruise":      depcruiseCmd,
+	"semgrep":        semgrepCmd,
+	"archunit":       archunitCmd,
+	"importlinter":   importlinterCmd,
+	"kyverno":        kyvernoCmd,
+	"gatekeeper":     gatekeeperCmd,
+	"eslint":         eslintCmd,
 }
 
 // baselineCmd runs one check command and records or trims fingerprints. create adds entries only for
