@@ -43,7 +43,7 @@ func ask(t *testing.T, server *Server, message string) map[string]any {
 	return reply
 }
 
-const latestMeta = `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}`
+const latestMeta = `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}`
 
 func TestLegacyClientsGetTheHandshakeAndPlainResults(t *testing.T) {
 	server := NewServer("1.0.0", &fakeBackend{})
@@ -122,6 +122,45 @@ func mustJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestStatelessRequestsMustBeComplete(t *testing.T) {
+	server := NewServer("1", &fakeBackend{})
+	for name, tc := range map[string]struct {
+		meta string
+		code float64
+	}{
+		"no capabilities": {`"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}`, codeInvalidParams},
+		"no version":      {`"_meta":{"io.modelcontextprotocol/clientCapabilities":{}}`, codeInvalidParams},
+		"bad version":     {`"_meta":{"io.modelcontextprotocol/protocolVersion":7,"io.modelcontextprotocol/clientCapabilities":{}}`, codeUnsupportedVersion},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reply := ask(t, server, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{`+tc.meta+`}}`)
+			if reply["error"].(map[string]any)["code"] != tc.code {
+				t.Fatalf("%v", reply)
+			}
+		})
+	}
+	if reply := ask(t, server, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"progressToken":"x"}}}`); reply["error"] != nil {
+		t.Fatalf("another protocol's _meta is not ours to refuse: %v", reply)
+	}
+}
+
+func TestStatelessClientsDoNotGetTheRemovedMethods(t *testing.T) {
+	server := NewServer("1", &fakeBackend{})
+	for _, method := range []string{"initialize", "ping", "logging/setLevel", "resources/subscribe"} {
+		reply := ask(t, server, `{"jsonrpc":"2.0","id":1,"method":"`+method+`","params":{`+latestMeta+`}}`)
+		if reply["error"].(map[string]any)["code"] != float64(codeMethodNotFound) {
+			t.Errorf("%s: %v", method, reply)
+		}
+	}
+}
+
+func TestDiscoverWorksAsAProbe(t *testing.T) {
+	result := ask(t, NewServer("1", &fakeBackend{}), `{"jsonrpc":"2.0","id":1,"method":"server/discover"}`)["result"].(map[string]any)
+	if result["supportedVersions"].([]any)[0] != LatestVersion {
+		t.Fatalf("%v", result)
+	}
 }
 
 func TestProtocolErrors(t *testing.T) {

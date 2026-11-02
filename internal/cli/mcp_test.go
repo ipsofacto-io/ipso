@@ -373,7 +373,7 @@ func TestMCPStdioServesCurrentAndOlderClients(t *testing.T) {
 		})
 	}
 	t.Run(mcptools.LatestVersion, func(t *testing.T) {
-		meta := `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}`
+		meta := `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}`
 		input := `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{` + meta + `}}` + "\n" +
 			fmt.Sprintf(list, `,"params":{`+meta+`}`) + fmt.Sprintf(call, ","+meta)
 		text := runMCPBinary(t, root, input)
