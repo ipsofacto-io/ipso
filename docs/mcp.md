@@ -26,7 +26,7 @@ command = "ipso"
 args = ["mcp"]
 ```
 
-The server has connected in Claude Code with `claude mcp list` and listed its tools in `cursor-agent mcp list-tools`. It has not run in Codex.
+The server has run in Claude Code, Cursor, and Codex.
 
 ## Tools
 

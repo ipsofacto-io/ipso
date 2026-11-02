@@ -20,7 +20,7 @@ Every agent gets the same decision. What it can do with that decision differs, s
 
 Only Claude Code passes on an `advise` message at edit time. Codex describes its own hooks as a guardrail and not an enforcement boundary. Project hooks there load only in a trusted project and after review with `/hooks`. A Copilot hook that times out fails open. Cursor and Kiro do not document the input of their file tools, so the hook reads a call by its shape, and a tool whose shape it does not recognize gets no answer.
 
-None of these four has run with `ipso hook` in a live session. The tests feed each vendor's documented events to the command.
+With v0.4.0, a violating edit was denied in a live session of Codex, Copilot CLI, and Cursor, and refused in Kiro. The Copilot cloud agent has not been tried. The tests feed each vendor's documented events to the command.
 
 ## Without a hook: the PR check
 
@@ -76,4 +76,4 @@ Pass `--bundle`, `--digest`, and `--key`, or set the plugin options `bundle_dir`
 
 The hook guards a cooperating agent and is not a sandbox. A shell command can hide what it touches, and a build the agent replaced from outside these tools is only caught by a signed bundle. A missing `ipso` binary is a non-blocking error in Claude Code, so the hook fails open with a notice. CI remains the gate.
 
-The hook has been tested against the event formats the vendors document. It has not run in a live session of any agent.
+The hook is tested against the event formats the vendors document, and it has stopped a violating edit in a live session of Claude Code, Codex, Copilot CLI, Cursor, and Kiro.
