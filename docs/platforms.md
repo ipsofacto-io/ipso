@@ -2,7 +2,7 @@
 
 Spacelift, env0, and Scalr run Terraform or OpenTofu on their own workers and let you run commands around each phase. A hook runs `ipso check plan` on the worker, against the run's own plan, and a non-zero exit stops the run. There is no webhook, no ipso service, and no token, so the plan stays on the worker.
 
-> Validation status: none of these has run on the vendor's platform yet. [`ipsofacto-io/examples`](https://github.com/ipsofacto-io/examples/tree/main/platforms) runs the exact hook commands on a real Terraform plan and checks their exit codes, and the vendor column in each section says what the vendor documents. Validate on a test stack before you rely on the block, as the last section describes.
+> Validation status: the Scalr hook ran on Scalr on 2026-11-02, and a blocking violation stopped the apply, as [Validation on Scalr](#validation-on-scalr) records. The Spacelift and env0 hooks have not run on their platforms. [`ipsofacto-io/examples`](https://github.com/ipsofacto-io/examples/tree/main/platforms) runs the exact hook commands on a real Terraform plan and checks their exit codes, and the vendor column in each section says what the vendor documents. Validate on a test stack before you rely on the block, as the last section describes.
 
 ## What every platform needs
 
@@ -87,11 +87,22 @@ Attach it at **pre-apply**, and at **post-plan** if you want the verdict on plan
 | Point | What Scalr documents |
 | --- | --- |
 | Where it runs | In the same container as Terraform, with its output in the run's console |
-| What stops the run | A hook that exits non-zero fails the run at that point, according to Scalr's learning center. The hooks reference does not state it, so this is the first thing to validate. |
+| What stops the run | A hook that exits non-zero fails the run at that point. Scalr's learning center says so and its hooks reference does not, and the validation below confirmed it at pre-apply. |
 | The plan file | `/opt/data/terraform.tfplan.bin` in the docs' example |
 | Which operation | `SCALR_TERRAFORM_OPERATION` names plan or apply. `post-plan` runs whether or not the plan succeeded |
 
-Scalr's checkout may not be a git repository in every workspace type. If `git rev-parse` fails, the hook fails, which is the safe direction: change the `cd` to the path your workspace uses.
+A CLI-driven workspace is not a git checkout: Scalr puts the uploaded configuration in `/opt/workdir`, and the hook runs there. `git rev-parse` fails in it, so the script above fails every run, which is the safe direction. In such a workspace, replace the `cd` line with `cd /opt/workdir` and upload the decisions with the configuration. Other workspace types may differ, so check where your hook runs before you rely on it.
+
+### Validation on Scalr
+
+On 2026-11-02 the hook ran on Scalr's hosted runner, `scalr/runner:0.6.4` with Terraform 1.5.7, at pre-apply in a CLI-driven workspace. It installed `ipso` 0.4.0 from the release archive at a pinned SHA-256, then ran the commands above from `/opt/workdir`, with the decisions of the [Atlantis sample](https://github.com/ipsofacto-io/examples/tree/main/atlantis/sample) uploaded beside the configuration.
+
+| Case | What Scalr did |
+| --- | --- |
+| A plan that breaks a blocking decision | The hook printed the violation and exited 1. Scalr reported `Pre-apply hook failed with exit code 1`, the run ended `Failed`, and the state kept the old value |
+| A plan that breaks only a warning decision | The hook printed the warning and exited 0, and the apply created the resource |
+
+The invalid decision case of the last section did not run on Scalr; `platforms / hooks` covers its exit code. Terraform 1.16 cannot confirm a Scalr run from the CLI, because it asks Scalr's API for policy evaluations that Scalr does not serve, so both runs were approved in Scalr's UI.
 
 ## Validate it on a test stack
 
