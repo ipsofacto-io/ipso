@@ -78,8 +78,14 @@ func compileRepo(in compiler.Input) ([]compiler.Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := vet(in.Check.Ref, src, false, nil); err != nil {
+	if err := Vet(in.Check.Ref, src); err != nil {
 		return nil, err
 	}
 	return []compiler.Artifact{{Name: policyName, Data: src}}, nil
+}
+
+// Vet checks one repository Rego module the way Compile checks a ref that names no template. It is
+// the whole compile step for such a ref, because the artifact is the module itself.
+func Vet(name string, src []byte) error {
+	return vet(name, src, false, nil)
 }
