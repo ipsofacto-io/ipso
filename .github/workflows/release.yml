@@ -42,7 +42,7 @@ jobs:
           cache-dependency-path: |
             internal/compiler/semgrep/testdata/tool/requirements.txt
             internal/compiler/importlinter/testdata/tool/requirements.txt
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v6.1.0
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"
@@ -87,7 +87,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
-    uses: ipsofacto-io/.github/.github/workflows/release-cli.yml@32c374491dac1c7ea02b8158609244f2519c4296
+    uses: ipsofacto-io/.github/.github/workflows/release-cli.yml@eed4a1c19f43cfbe2faaa7ad5575ce43dc0abcff
     with:
       ref: ${{ inputs.sign-tag || github.ref }}
       tag: ${{ inputs.sign-tag || github.ref_name }}

@@ -101,7 +101,7 @@ jobs:
   release:
     name: ci / release
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,20 +110,21 @@ jobs:
         with:
           version: v2.18.3
           install-only: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Any deprecation fails this check, so a release never finds one first.
       - name: Check GoReleaser config
+        run: goreleaser check
+      # Builds the archives and the cask the release would publish, and publishes nothing.
+      - name: Build a snapshot release
+        env:
+          HOMEBREW_TAP_TOKEN: ""
+          SKIP_HOMEBREW: "true"
         run: |
           set -euo pipefail
-          set +e
-          goreleaser check
-          code="$?"
-          set -e
-          # Exit 2 means the config is valid and uses the formula publisher.
-          # GoReleaser 2.18 deprecates formulas in favor of casks. The tap
-          # install is `brew install ipsofacto-io/tap/ipso`, which is a formula.
-          if [ "$code" -eq 2 ]; then
-            exit 0
-          fi
-          exit "$code"
+          goreleaser release --snapshot --clean --skip=docker,publish
+          grep -q 'com.apple.quarantine' dist/homebrew/Casks/ipso.rb
 
   depcruise:
     name: ci / depcruise
@@ -187,7 +188,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v6.1.0
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"
@@ -346,7 +347,7 @@ jobs:
           cache-dependency-path: |
             internal/compiler/semgrep/testdata/tool/requirements.txt
             internal/compiler/importlinter/testdata/tool/requirements.txt
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v6.1.0
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"

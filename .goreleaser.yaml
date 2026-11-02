@@ -46,20 +46,29 @@ release:
     owner: ipsofacto-io
     name: ipso
 
-brews:
+# A cask, because GoReleaser deprecates formulas that install a pre-built binary (ADR-0079). The
+# binary is not notarized, so on macOS the hook clears the quarantine flag that Homebrew sets on a
+# cask download. A formula install of the same binary is not quarantined either.
+homebrew_casks:
   - name: ipso
+    binaries: [ipso]
     repository:
       owner: ipsofacto-io
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     skip_upload: "{{ .Env.SKIP_HOMEBREW }}"
-    directory: Formula
+    directory: Casks
     homepage: https://ipsoplatform.io
     description: CLI that validates engineering decision records
-    license: Apache-2.0
     commit_author:
       name: Luca Bertelli
       email: bertelli.luca@proton.me
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ipso"]
+          end
 
 dockers_v2:
   - ids:
