@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 )
 
 // LatestVersion is the protocol revision ADR-0015 targets. It has no handshake: each request
@@ -19,8 +20,10 @@ const LatestVersion = "2026-07-28"
 var legacyVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
 const (
-	metaProtocolVersion = "io.modelcontextprotocol/protocolVersion"
-	metaServerInfo      = "io.modelcontextprotocol/serverInfo"
+	metaProtocolVersion    = "io.modelcontextprotocol/protocolVersion"
+	metaClientCapabilities = "io.modelcontextprotocol/clientCapabilities"
+	metaServerInfo         = "io.modelcontextprotocol/serverInfo"
+	metaPrefix             = "io.modelcontextprotocol/"
 
 	codeParse              = -32700
 	codeInvalidRequest     = -32600
@@ -139,20 +142,23 @@ func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
 			return nil, &rpcError{Code: codeInvalidParams, Message: "invalid params"}
 		}
 	}
-	stateless := false
-	if raw, ok := params.Meta[metaProtocolVersion]; ok {
-		var version string
-		if err := json.Unmarshal(raw, &version); err != nil || !slices.Contains(SupportedVersions(), version) {
-			return nil, &rpcError{Code: codeUnsupportedVersion, Message: "unsupported protocol version", Data: map[string]any{"supported": SupportedVersions(), "requested": version}}
-		}
-		stateless = version == LatestVersion
+	stateless, failure := checkMeta(params.Meta)
+	if failure != nil {
+		return nil, failure
 	}
 
 	var result map[string]any
 	switch req.Method {
 	case "initialize":
+		// 2026-07-28 removes the handshake and ping, so only an older client gets them.
+		if stateless {
+			return nil, &rpcError{Code: codeMethodNotFound, Message: "method not found"}
+		}
 		return s.initialize(params.ProtocolVersion), nil
 	case "ping":
+		if stateless {
+			return nil, &rpcError{Code: codeMethodNotFound, Message: "method not found"}
+		}
 		return map[string]any{}, nil
 	case "server/discover":
 		result = map[string]any{"supportedVersions": SupportedVersions(), "capabilities": capabilities(), "instructions": instructions, "ttlMs": toolListTTL, "cacheScope": "public"}
@@ -164,7 +170,6 @@ func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
 			result["cacheScope"] = "public"
 		}
 	case "tools/call":
-		var failure *rpcError
 		if result, failure = s.callTool(ctx, params.Name, params.Arguments); failure != nil {
 			return nil, failure
 		}
@@ -176,6 +181,32 @@ func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
 		result["_meta"] = map[string]any{metaServerInfo: s.serverInfo()}
 	}
 	return result, nil
+}
+
+// checkMeta reads what a request says about its protocol. No _meta from this protocol means an older
+// client, or a 2026-07-28 client probing with server/discover. Otherwise the version is required,
+// and on 2026-07-28 so are the client's capabilities. The first result says it is that revision.
+func checkMeta(meta map[string]json.RawMessage) (bool, *rpcError) {
+	raw, declared := meta[metaProtocolVersion]
+	if !declared {
+		for key := range meta {
+			if strings.HasPrefix(key, metaPrefix) {
+				return false, &rpcError{Code: codeInvalidParams, Message: "_meta is missing " + metaProtocolVersion}
+			}
+		}
+		return false, nil
+	}
+	var version string
+	if err := json.Unmarshal(raw, &version); err != nil || !slices.Contains(SupportedVersions(), version) {
+		return false, &rpcError{Code: codeUnsupportedVersion, Message: "unsupported protocol version", Data: map[string]any{"supported": SupportedVersions(), "requested": version}}
+	}
+	if version != LatestVersion {
+		return false, nil
+	}
+	if _, ok := meta[metaClientCapabilities]; !ok {
+		return false, &rpcError{Code: codeInvalidParams, Message: "_meta is missing " + metaClientCapabilities}
+	}
+	return true, nil
 }
 
 // SupportedVersions lists every protocol revision the server answers, newest first.
