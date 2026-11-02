@@ -15,12 +15,23 @@ jobs:
   release-please:
     name: release-please
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      # GitHub starts no workflow for a tag this job's token creates, so the tag alone builds nothing.
+      # A dispatch is the documented exception, and --ref keeps the build on refs/tags/v<version>, which
+      # ipso-action verifies. See ADR-0078.
+      - name: Start the release build
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"

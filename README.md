@@ -158,7 +158,7 @@ decisions:
 
 ## Release
 
-A push to `main` opens a release-please pull request. Merging it tags `vX.Y.Z`. From v0.1.1, that tag is built by the pinned reusable workflow in `ipsofacto-io/.github`. The build publishes binaries, `checksums.txt`, a CycloneDX SBOM, keyless cosign signatures, and GitHub artifact attestations. The image is `ghcr.io/ipsofacto-io/ipso`. v0.1.1 is the first SLSA Build Level 3 release. v0.1.0 keeps its original bytes and has cosign signatures and a CycloneDX SBOM; it is not Level 3. The GHCR package is still private. The Homebrew formula is published to `ipsofacto-io/homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set on this repository.
+A push to `main` opens a release-please pull request. Merging it tags `vX.Y.Z` and starts the build on that tag, with no other step. From v0.1.1, that tag is built by the pinned reusable workflow in `ipsofacto-io/.github`. The build publishes binaries, `checksums.txt`, a CycloneDX SBOM, keyless cosign signatures, and GitHub artifact attestations. The image is `ghcr.io/ipsofacto-io/ipso`. v0.1.1 is the first SLSA Build Level 3 release. v0.1.0 keeps its original bytes and has cosign signatures and a CycloneDX SBOM; it is not Level 3. The GHCR package is still private. The Homebrew formula is published to `ipsofacto-io/homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set on this repository.
 
 ## License
 

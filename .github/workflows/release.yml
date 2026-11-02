@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       sign-tag:
-        description: Existing tag to sign without building
-        required: true
+        description: Existing tag to sign without building. Leave empty to build the tag this run is on.
+        required: false
         type: string
 
 permissions:
@@ -17,7 +17,8 @@ permissions:
 jobs:
   conformance:
     name: release / conformance
-    if: github.event_name == 'push'
+    # A build runs on a tag. A dispatch on a branch builds nothing, and signing runs no conformance.
+    if: startsWith(github.ref, 'refs/tags/v') && inputs.sign-tag == ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -74,7 +75,13 @@ jobs:
 
   release:
     needs: conformance
-    if: always() && (needs.conformance.result == 'success' || needs.conformance.result == 'skipped')
+    # Only signing may go ahead without conformance, because a skipped job is also what a dispatch on a
+    # branch produces, and that must not publish.
+    if: >-
+      always() && (
+        (inputs.sign-tag == '' && needs.conformance.result == 'success') ||
+        (inputs.sign-tag != '' && needs.conformance.result == 'skipped')
+      )
     permissions:
       contents: write
       packages: write
@@ -82,8 +89,8 @@ jobs:
       attestations: write
     uses: ipsofacto-io/.github/.github/workflows/release-cli.yml@32c374491dac1c7ea02b8158609244f2519c4296
     with:
-      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sign-tag || github.ref }}
-      tag: ${{ github.event_name == 'workflow_dispatch' && inputs.sign-tag || github.ref_name }}
-      sign-only: ${{ github.event_name == 'workflow_dispatch' }}
+      ref: ${{ inputs.sign-tag || github.ref }}
+      tag: ${{ inputs.sign-tag || github.ref_name }}
+      sign-only: ${{ inputs.sign-tag != '' }}
     secrets:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
