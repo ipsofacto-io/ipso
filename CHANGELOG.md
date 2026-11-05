@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/ipsofacto-io/ipso/compare/v0.4.0...v0.5.0) (2026-11-05)
+
+
+### Features
+
+* expose agent-edit rule vetting to other modules ([#58](https://github.com/ipsofacto-io/ipso/issues/58)) ([ee62752](https://github.com/ipsofacto-io/ipso/commit/ee627522be5725333549476069c833eacfa49649))
+* **premise:** expose the premise probe to other modules ([#60](https://github.com/ipsofacto-io/ipso/issues/60)) ([d21c375](https://github.com/ipsofacto-io/ipso/commit/d21c3756d31410a8c612252feb6cb484b80a137b))
+
 ## [0.4.0](https://github.com/ipsofacto-io/ipso/compare/v0.3.0...v0.4.0) (2026-11-02)
 
 
