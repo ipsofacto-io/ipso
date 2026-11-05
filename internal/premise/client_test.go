@@ -3,17 +3,13 @@ package premise
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
-	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
+
+	"github.com/ipsofacto-io/ipso/internal/premise/premisetest"
 )
 
 func TestCheckRefusesPrivateAddress(t *testing.T) {
@@ -38,7 +34,7 @@ func TestCheckRefusesPrivateAddress(t *testing.T) {
 func TestCheckPinsTheDialAndSendsNoCredentials(t *testing.T) {
 	const body = `{"major":16,"secret":"BODY-SECRET"}`
 	var header http.Header
-	srv, pool := premiseServer(t, "example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, pool := premisetest.Server(t, "example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header = r.Header.Clone()
 		_, _ = w.Write([]byte(body))
 	}))
@@ -73,7 +69,7 @@ func TestCheckPinsTheDialAndSendsNoCredentials(t *testing.T) {
 
 func TestCheckRedirectDoesNotFollow(t *testing.T) {
 	hits := 0
-	srv, pool := premiseServer(t, "example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, pool := premisetest.Server(t, "example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/secret" {
 			hits++
 			_, _ = w.Write([]byte("secret-body"))
@@ -91,7 +87,7 @@ func TestCheckRedirectDoesNotFollow(t *testing.T) {
 }
 
 func TestCheckNonJSON(t *testing.T) {
-	srv, pool := premiseServer(t, "example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, pool := premisetest.Server(t, "example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("not-json-BODY"))
 	}))
 	got := pinnedClient(srv, pool).Check(context.Background(), Spec{
@@ -107,7 +103,7 @@ func TestCheckNonJSON(t *testing.T) {
 
 func TestCheckBodyTooLarge(t *testing.T) {
 	payload := bytes.Repeat([]byte("a"), BodyLimit+1)
-	srv, pool := premiseServer(t, "example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, pool := premisetest.Server(t, "example.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for range payload {
 			_, _ = w.Write([]byte("a"))
 		}
@@ -134,44 +130,4 @@ func pinnedClient(srv *httptest.Server, pool *x509.CertPool) Client {
 			return d.DialContext(ctx, network, srv.Listener.Addr().String())
 		},
 	}
-}
-
-func premiseServer(t *testing.T, host string, handler http.Handler) (*httptest.Server, *x509.CertPool) {
-	t.Helper()
-	cert, pool, err := certForHost(host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := httptest.NewUnstartedServer(handler)
-	srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
-	srv.StartTLS()
-	t.Cleanup(srv.Close)
-	return srv, pool
-}
-
-func certForHost(host string) (tls.Certificate, *x509.CertPool, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, nil, err
-	}
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		DNSNames:              []string{host},
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		return tls.Certificate{}, nil, err
-	}
-	leaf, err := x509.ParseCertificate(der)
-	if err != nil {
-		return tls.Certificate{}, nil, err
-	}
-	pool := x509.NewCertPool()
-	pool.AddCert(leaf)
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, pool, nil
 }

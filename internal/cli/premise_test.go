@@ -3,15 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
-	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +17,7 @@ import (
 
 	"github.com/ipsofacto-io/ipso/internal/compiler/builtin"
 	"github.com/ipsofacto-io/ipso/internal/premise"
+	"github.com/ipsofacto-io/ipso/internal/premise/premisetest"
 )
 
 func TestPremiseCheckPassFailReport(t *testing.T) {
@@ -364,14 +359,7 @@ func sha256Hex(body string) string {
 
 func premiseHook(t *testing.T, handler http.Handler, ips []net.IP, dialed *int) (premise.Client, *httptest.Server) {
 	t.Helper()
-	cert, pool, err := premiseCert("example.com")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := httptest.NewUnstartedServer(handler)
-	srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
-	srv.StartTLS()
-	t.Cleanup(srv.Close)
+	srv, pool := premisetest.Server(t, "example.com", handler)
 	if ips == nil {
 		ips = []net.IP{net.ParseIP("1.1.1.1")}
 	}
@@ -389,31 +377,4 @@ func premiseHook(t *testing.T, handler http.Handler, ips []net.IP, dialed *int) 
 		},
 	}
 	return client, srv
-}
-
-func premiseCert(host string) (tls.Certificate, *x509.CertPool, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, nil, err
-	}
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		DNSNames:              []string{host},
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		return tls.Certificate{}, nil, err
-	}
-	leaf, err := x509.ParseCertificate(der)
-	if err != nil {
-		return tls.Certificate{}, nil, err
-	}
-	pool := x509.NewCertPool()
-	pool.AddCert(leaf)
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, pool, nil
 }
