@@ -14,7 +14,9 @@ import (
 )
 
 // The tests below put a fake python first on PATH. It answers the version probe and, for the shim run,
-// records how it was started and prints a captured report.
+// records how it was started and prints a captured report. Its ls calls run with a width ls accepts: the
+// product sets COLUMNS=65536 for import-linter, and a newer ls writes a warning about that to stderr, which
+// would join the error text the tests compare.
 const fakePython = `#!/bin/sh
 if [ "$#" -eq 6 ]; then
   printf '%s\n%s\n' "$FAKE_LINTER" "$FAKE_GRIMP"
@@ -22,12 +24,12 @@ if [ "$#" -eq 6 ]; then
 fi
 {
   echo "pwd=$(/bin/pwd -P)"
-  echo "entries=[$(/bin/ls -A)]"
+  echo "entries=[$(COLUMNS=80 /bin/ls -A)]"
   echo "env=$NO_COLOR $TERM $COLUMNS ${FORCE_COLOR-unset} ${LINES-unset} ${COLORTERM-unset}"
   echo "flags=$1 $2 $3 $4 $5"
   echo "config=$7"
   echo "versions=$8 $9"
-  echo "src=[$(/bin/ls "${10}")]"
+  echo "src=[$(COLUMNS=80 /bin/ls "${10}")]"
   echo "roots=${11} ${12}"
 } > "$FAKE_LOG"
 /bin/cp "$7" "$FAKE_CONFIG"
