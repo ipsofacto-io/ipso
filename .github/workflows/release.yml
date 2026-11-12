@@ -87,7 +87,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
-    uses: ipsofacto-io/.github/.github/workflows/release-cli.yml@eed4a1c19f43cfbe2faaa7ad5575ce43dc0abcff
+    uses: ipsofacto-io/.github/.github/workflows/release-cli.yml@97dee3da02874afba6524584a441411dae702871
     with:
       ref: ${{ inputs.sign-tag || github.ref }}
       tag: ${{ inputs.sign-tag || github.ref_name }}
