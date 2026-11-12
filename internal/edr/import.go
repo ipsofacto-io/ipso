@@ -98,7 +98,7 @@ type sourceItem struct {
 	URL  string `yaml:"url"`
 }
 
-func encode(rec importedRecord, body string) (string, error) {
+func encode(rec any, body string) (string, error) {
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	encoder := yaml.NewEncoder(&buf)
@@ -331,6 +331,13 @@ func newULID(now time.Time) string {
 	if _, err := rand.Read(raw[6:]); err != nil {
 		copy(raw[6:], []byte("ipsoproba"))
 	}
+	return ULIDFrom(raw)
+}
+
+// ULIDFrom prints 16 bytes as a 26 character ULID. The first character holds only 3 bits, so a first
+// byte of 0x80 or more loses its top bit, and the result is always a valid id.
+func ULIDFrom(raw [16]byte) string {
+	raw[0] &= 0x7f
 	var number big.Int
 	number.SetBytes(raw[:])
 	out := make([]byte, 26)
