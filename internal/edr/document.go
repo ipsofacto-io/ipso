@@ -67,16 +67,10 @@ func (d Document) Sources() []Source {
 // Parse splits a Markdown file into frontmatter and body.
 // Dates become YYYY-MM-DD strings so the JSON Schema can validate them.
 func Parse(text string) (Document, error) {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	if !strings.HasPrefix(text, "---\n") {
-		return Document{}, fmt.Errorf("frontmatter must start with ---")
+	raw, body, err := splitFront(strings.ReplaceAll(text, "\r\n", "\n"))
+	if err != nil {
+		return Document{}, err
 	}
-	end := strings.Index(text[4:], "\n---\n")
-	if end < 0 {
-		return Document{}, fmt.Errorf("frontmatter is missing the closing ---")
-	}
-	raw := text[4 : 4+end]
-	body := text[4+end+5:]
 	var root yaml.Node
 	if err := yaml.Unmarshal([]byte(raw), &root); err != nil {
 		return Document{}, fmt.Errorf("frontmatter: %w", err)
@@ -102,6 +96,18 @@ func Parse(text string) (Document, error) {
 		return Document{}, fmt.Errorf("frontmatter must be a mapping")
 	}
 	return Document{Front: asMap, Body: body, front: frontNode}, nil
+}
+
+// splitFront cuts a file with LF line endings into the frontmatter between the two --- lines and the body.
+func splitFront(text string) (front, body string, err error) {
+	if !strings.HasPrefix(text, "---\n") {
+		return "", "", fmt.Errorf("frontmatter must start with ---")
+	}
+	end := strings.Index(text[4:], "\n---\n")
+	if end < 0 {
+		return "", "", fmt.Errorf("frontmatter is missing the closing ---")
+	}
+	return text[4 : 4+end], text[4+end+5:], nil
 }
 
 func coerce(value any) any {
