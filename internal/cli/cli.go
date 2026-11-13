@@ -85,6 +85,8 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 			return 2
 		}
 		return compileCmd(root, stdout, stderr, d)
+	case "deliver":
+		return deliverCmd(root, args[1:], os.Stdin, stdout, stderr, d)
 	case "bundle":
 		return bundleCmd(root, args[1:], stdout, stderr)
 	case "render":
@@ -139,6 +141,7 @@ usage:
   ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]
   ipso explain <slug>
   ipso import [path...]
+  ipso deliver <accepted-checks.json|->
   ipso premise check [--report file]
   ipso baseline create|update <subcommand> <args>
   ipso bundle pack --layout dir
