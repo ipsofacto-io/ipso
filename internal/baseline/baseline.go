@@ -208,6 +208,56 @@ func (f File) Find(decisionID string, index int, scope Scope) int {
 	})
 }
 
+var (
+	// ErrNoEntry means the file holds no entry for the decision.
+	ErrNoEntry = errors.New("no baseline entry for the decision")
+	// ErrEmpty means every entry of the decision is empty, so there is nothing to upload.
+	ErrEmpty = errors.New("every baseline entry of the decision is empty")
+)
+
+// ExportVersion is the version of the document Export writes.
+const ExportVersion = 1
+
+// Export is the fingerprints of one decision, ready for the web app to upload (ADR-0121). It holds no salt, no
+// check index, no env and no input, so it can leave the repository without what ADR-0059 keeps in it.
+type Export struct {
+	Version      int      `json:"baseline_export_version"`
+	DecisionID   string   `json:"decision_id"`
+	Fingerprints []string `json:"fingerprints"`
+}
+
+// Export returns the sorted union of the fingerprints of every check, env and input of one decision. The file
+// refuses a repeated fingerprint within a decision, and each entry's env, input and check index feed its
+// digests, so the union has no repeat and is the flat set the registry stores (ADR-0052).
+func (f File) Export(decisionID string) (Export, error) {
+	found := false
+	digests := []string{}
+	for _, check := range f.Checks {
+		if check.DecisionID != decisionID {
+			continue
+		}
+		found = true
+		digests = append(digests, check.Fingerprints...)
+	}
+	switch {
+	case !found:
+		return Export{}, ErrNoEntry
+	case len(digests) == 0:
+		return Export{}, ErrEmpty
+	}
+	sort.Strings(digests)
+	return Export{Version: ExportVersion, DecisionID: decisionID, Fingerprints: digests}, nil
+}
+
+// Marshal encodes the export, one fingerprint per line.
+func (e Export) Marshal() ([]byte, error) {
+	raw, err := json.MarshalIndent(e, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
+
 // Fingerprints returns one digest per violation, in order, and an empty string for a violation that
 // cannot be baselined. Repeats of one identity in one check are numbered from 1 in the order given.
 func Fingerprints(salt string, entry compiler.Entry, scope Scope, violations []compiler.Violation) ([]string, error) {
