@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0](https://github.com/ipsofacto-io/ipso/compare/v0.5.0...v0.6.0) (2026-11-14)
+
+
+### Features
+
+* **cli:** deliver accepted agent-edit checks into a repository ([#64](https://github.com/ipsofacto-io/ipso/issues/64)) ([5752015](https://github.com/ipsofacto-io/ipso/commit/5752015d2b4b7a67928964135790b1d101f57622))
+* **cli:** export the fingerprints of one decision without the salt ([#66](https://github.com/ipsofacto-io/ipso/issues/66)) ([c59be6a](https://github.com/ipsofacto-io/ipso/commit/c59be6a7eb32ae932e27482e1c21f2cb9a14042c))
+* **cli:** write the digests of the violations of a check in the verdict report ([#67](https://github.com/ipsofacto-io/ipso/issues/67)) ([0a222af](https://github.com/ipsofacto-io/ipso/commit/0a222af5bf0601e1be3c135a144e1942f1aaedca))
+
 ## [0.5.0](https://github.com/ipsofacto-io/ipso/compare/v0.4.0...v0.5.0) (2026-11-12)
 
 
