@@ -233,12 +233,16 @@ func (e Entry) SelectedFor(target, env string, now time.Time) bool {
 // Position is set by engines that report a place in a repository file, and SARIF is its only reader.
 // Identity is the raw values that feed a baseline fingerprint (ADR-0059), and no output prints it.
 // A nil Identity means the violation cannot be baselined. Baselined is set when a baseline covers it.
+// Fingerprint is the digest of ADR-0059 that was computed for the violation, which needs the stamped baseline of
+// the check and an identity, and is empty otherwise. No output prints it, and only a version 2 report carries it
+// (ADR-0122).
 type Violation struct {
-	Message   string
-	Address   string
-	Position  *Position
-	Identity  []string
-	Baselined bool
+	Message     string
+	Address     string
+	Position    *Position
+	Identity    []string
+	Baselined   bool
+	Fingerprint string
 }
 
 // Position is a place in a repository file. Path is slash-separated and relative to the repository root.
@@ -335,14 +339,20 @@ func contains(values []string, want string) bool {
 	return false
 }
 
-// Verdict is the outcome of one evaluated check.
+// Verdict is the outcome of one evaluated check. Fingerprints are the sorted digests of ADR-0059 of every
+// violation of the check, covered by a baseline or not, so the control plane can read them against the baseline
+// it recorded (ADR-0122). They are the digests of an HMAC under a salt that stays in the repository, and never a
+// path, an address or a message. The list is empty unless the check has a baseline stamped into its manifest
+// entry, did not fail to evaluate, is not covered by a waiver, and has an identity for every violation: it holds
+// all of the violations or none.
 type Verdict struct {
-	DecisionID string `json:"decision_id"`
-	Slug       string `json:"slug"`
-	CheckIndex int    `json:"check_index"`
-	Mode       string `json:"mode"`
-	Result     string `json:"result"`
-	Violations int    `json:"violations"`
+	DecisionID   string   `json:"decision_id"`
+	Slug         string   `json:"slug"`
+	CheckIndex   int      `json:"check_index"`
+	Mode         string   `json:"mode"`
+	Result       string   `json:"result"`
+	Violations   int      `json:"violations"`
+	Fingerprints []string `json:"fingerprints"`
 }
 
 // PlanReport is the local verdict report. It carries counts and hashes, never plan contents.
@@ -508,6 +518,7 @@ func Judge(entry Entry, outcome Outcome) (verdict Verdict, hard bool) {
 		return verdict, false
 	case len(outcome.Violations) > 0:
 		covered := outcome.Baselined()
+		verdict.Fingerprints = fingerprintsOf(outcome.Violations)
 		if covered == len(outcome.Violations) {
 			verdict.Result = "waived"
 			verdict.Violations = covered
@@ -521,6 +532,20 @@ func Judge(entry Entry, outcome Outcome) (verdict Verdict, hard bool) {
 	}
 }
 
+// fingerprintsOf returns the sorted digests of all the violations, or nil when any violation has none, so the
+// control plane never reads part of a check as the whole of it.
+func fingerprintsOf(violations []Violation) []string {
+	digests := make([]string, len(violations))
+	for i, violation := range violations {
+		if violation.Fingerprint == "" {
+			return nil
+		}
+		digests[i] = violation.Fingerprint
+	}
+	sort.Strings(digests)
+	return digests
+}
+
 // Baselined counts the violations a baseline covers.
 func (o Outcome) Baselined() int {
 	covered := 0
@@ -532,8 +557,9 @@ func (o Outcome) Baselined() int {
 	return covered
 }
 
-// ReportVersion is the report contract version.
-const ReportVersion = 1
+// ReportVersion is the version of the verdict report of ADR-0030. Version 2 adds the digests of the violations
+// to each verdict (ADR-0122), and nothing else in a report changes.
+const ReportVersion = 2
 
 // MarshalReport encodes a plan report as deterministic JSON.
 // evaluated_at is UTC with a trailing Z and no fractional seconds.
@@ -640,6 +666,11 @@ func finishReport(evaluated time.Time, verdicts []Verdict) (time.Time, []Verdict
 	evaluated = evaluated.UTC().Truncate(time.Second)
 	if verdicts == nil {
 		verdicts = []Verdict{}
+	}
+	for i := range verdicts {
+		if verdicts[i].Fingerprints == nil {
+			verdicts[i].Fingerprints = []string{}
+		}
 	}
 	sort.Slice(verdicts, func(i, j int) bool {
 		if verdicts[i].DecisionID != verdicts[j].DecisionID {

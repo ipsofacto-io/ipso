@@ -453,7 +453,8 @@ func TestBaselinePrivacy(t *testing.T) {
 	}
 }
 
-func TestBaselineReportShapeIsUnchanged(t *testing.T) {
+// The report is version 2 and a verdict has the digests of its violations, and nothing else changed (ADR-0122).
+func TestBaselineReportCarriesTheDigestsOfItsViolations(t *testing.T) {
 	root := planRepo(t, baselinePlanCheck)
 	if _, stderr, code := baselineAt(t, "create", "plan", "plan.json"); code != 0 {
 		t.Fatal(stderr)
@@ -471,13 +472,115 @@ func TestBaselineReportShapeIsUnchanged(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded["report_version"] != float64(1) {
+	if decoded["report_version"] != float64(2) || len(decoded) != 7 {
 		t.Fatalf("report %s", raw)
 	}
 	verdict := decoded["verdicts"].([]any)[0].(map[string]any)
-	if len(verdict) != 6 {
+	if len(verdict) != 7 {
 		t.Fatalf("verdict fields %v", verdict)
 	}
+
+	// The digests are the ones of the local file, which are the ones `ipso baseline export` prints and a
+	// person uploads, so the control plane compares the same values.
+	got := readVerdict(t, report)
+	exported, _, code := baselineAt(t, "export", idA)
+	if code != 0 {
+		t.Fatal(exported)
+	}
+	var export baseline.Export
+	if err := json.Unmarshal([]byte(exported), &export); err != nil {
+		t.Fatal(err)
+	}
+	if got.Result != "waived" || got.Violations != 1 || len(got.Fingerprints) != 1 || !slices.Equal(got.Fingerprints, export.Fingerprints) {
+		t.Fatalf("verdict %+v, export %+v", got, export)
+	}
+}
+
+// A failing check lists the digest of every violation, the covered ones too, because `violations` counts only
+// the uncovered ones and the control plane needs the total to know whether all are in its baseline.
+func TestBaselineFailingReportListsEveryDigestAndNotOnlyTheUncovered(t *testing.T) {
+	root := planRepo(t, baselinePlanCheck)
+	if _, stderr, code := baselineAt(t, "create", "plan", "plan.json"); code != 0 {
+		t.Fatal(stderr)
+	}
+	recorded := readBaseline(t, root).Checks[0].Fingerprints
+	mustCompile(t)
+	writeRepoFile(t, root, "plan.json", twoVolumes())
+	report := filepath.Join(root, "report.json")
+	if _, _, code := planAt(t, baselineNow, []string{"plan.json", "--report", report}); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	verdict := readVerdict(t, report)
+	if verdict.Result != "fail" || verdict.Violations != 1 || len(verdict.Fingerprints) != 2 {
+		t.Fatalf("verdict %+v", verdict)
+	}
+	if !slices.IsSorted(verdict.Fingerprints) || !slices.Contains(verdict.Fingerprints, recorded[0]) {
+		t.Fatalf("digests %v do not hold the recorded %v in order", verdict.Fingerprints, recorded)
+	}
+	for _, digest := range verdict.Fingerprints {
+		if !compiler.ValidDigest(digest) {
+			t.Fatalf("digest %q is not 64 lowercase hex characters", digest)
+		}
+	}
+}
+
+// A report holds no digest unless the runner has a baseline for the check, a waiver does not cover it, it did
+// not fail to evaluate, and every violation has an identity. The key is still there, and it is an empty list.
+func TestBaselineReportHasNoDigestWithoutABaselineAWaiverOrAFailure(t *testing.T) {
+	empty := func(t *testing.T, report string) {
+		t.Helper()
+		raw, err := os.ReadFile(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"fingerprints": []`) || strings.Contains(string(raw), `"fingerprints": null`) {
+			t.Fatalf("the report does not hold an empty list:\n%s", raw)
+		}
+	}
+	t.Run("no baseline on the runner", func(t *testing.T) {
+		root := planRepo(t, baselinePlanCheck)
+		report := filepath.Join(root, "report.json")
+		if _, _, code := planAt(t, baselineNow, []string{"plan.json", "--report", report}); code != 1 {
+			t.Fatalf("code %d", code)
+		}
+		if verdict := readVerdict(t, report); verdict.Result != "fail" || len(verdict.Fingerprints) != 0 {
+			t.Fatalf("verdict %+v", verdict)
+		}
+		empty(t, report)
+	})
+	t.Run("a waiver covers the check", func(t *testing.T) {
+		root := semgrepRepo(t, baselineNow, semgrepBlockCheck, true)
+		withSemgrep(t, "1.182.1", semgrepScan(semgrepHit, "1.182.1"))
+		if _, stderr, code := baselineAt(t, "create", "semgrep", "."); code != 0 {
+			t.Fatal(stderr)
+		}
+		mustCompile(t)
+		report := filepath.Join(root, "report.json")
+		if _, stderr, code := semgrepAt(t, baselineNow, []string{".", "--report", report}); code != 0 {
+			t.Fatal(stderr)
+		}
+		if verdict := readVerdict(t, report); verdict.Result != "waived" || len(verdict.Fingerprints) != 0 {
+			t.Fatalf("verdict %+v", verdict)
+		}
+		empty(t, report)
+	})
+	t.Run("the check fails to evaluate", func(t *testing.T) {
+		root := semgrepRepo(t, baselineNow, semgrepBlockCheck, false)
+		withSemgrep(t, "1.182.1", semgrepScan(semgrepHit, "1.182.1"))
+		if _, stderr, code := baselineAt(t, "create", "semgrep", "."); code != 0 {
+			t.Fatal(stderr)
+		}
+		mustCompile(t)
+		withSemgrep(t, "0.0.1", semgrepScan(semgrepHit, "0.0.1"))
+		report := filepath.Join(root, "report.json")
+		if _, _, code := semgrepAt(t, baselineNow, []string{".", "--report", report}); code != 1 {
+			t.Fatalf("code %d", code)
+		}
+		if verdict := readVerdict(t, report); verdict.Result != "error" || len(verdict.Fingerprints) != 0 {
+			t.Fatalf("verdict %+v", verdict)
+		}
+		empty(t, report)
+	})
 }
 
 func TestBaselineSARIFMarksCoveredResults(t *testing.T) {

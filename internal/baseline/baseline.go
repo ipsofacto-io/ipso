@@ -313,6 +313,7 @@ func Apply(entry compiler.Entry, scope Scope, outcome compiler.Outcome) (compile
 	for i, digest := range digests {
 		_, covered := recorded[digest]
 		marked[i].Baselined = digest != "" && covered
+		marked[i].Fingerprint = digest
 	}
 	outcome.Violations = marked
 	return outcome, nil
