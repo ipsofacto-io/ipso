@@ -29,6 +29,10 @@ The terminal prints each uncovered violation and a baselined count. An error is 
 
 A local baseline has no deadline. It applies while its decision is in force.
 
+## What the report carries
+
+A report written with `--report` is version 2. Each verdict also holds `fingerprints`, the sorted digests of every violation of the check, covered by the local baseline or not, so the control plane can read them against the baseline recorded for the decision and repository ([ADR-0122](https://github.com/ipsofacto-io/ipso-spec/blob/main/docs/adr/0122-baseline-on-verdict-reads.md)). They are the digests of this file, so they are the ones `ipso baseline export` prints and the salt is not in the report. The list is empty when the check has no baseline in the build, a waiver covers it, it failed to evaluate, or a violation has no identity, because the control plane reads the list as the whole of the check. `ipso premise check --report` is not a verdict report and stays at version 1.
+
 ## What cannot be baselined
 
 `ipso check ci` results and Checkov's `check not reported` mean a control did not run, so a baseline would switch that control off. They stay failures, and `create` reports how many it skipped. `ipso baseline create ci` is refused. Use a waiver with an expiry instead.

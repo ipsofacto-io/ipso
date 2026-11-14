@@ -192,7 +192,7 @@ func TestCheckKyvernoRealCleanAndViolating(t *testing.T) {
 			t.Fatalf("report carries %q: %s", leaked, body)
 		}
 	}
-	if decoded.ReportVersion != 1 || decoded.KyvernoVersion != "1.19.2" || len(decoded.BuildSHA256) != 64 || len(decoded.Paths) != 1 || decoded.Paths[0] != "k8s" {
+	if decoded.ReportVersion != 2 || decoded.KyvernoVersion != "1.19.2" || len(decoded.BuildSHA256) != 64 || len(decoded.Paths) != 1 || decoded.Paths[0] != "k8s" {
 		t.Fatalf("report %+v", decoded)
 	}
 	if len(decoded.Verdicts) != 1 || decoded.Verdicts[0].Result != "fail" || decoded.Verdicts[0].Violations != 1 {

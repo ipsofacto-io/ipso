@@ -46,7 +46,7 @@ func TestCheckPlan(t *testing.T) {
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.ReportVersion != 1 || decoded.Env != "prod" || len(decoded.PlanSHA256) != 64 || len(decoded.BuildSHA256) != 64 {
+	if decoded.ReportVersion != 2 || decoded.Env != "prod" || len(decoded.PlanSHA256) != 64 || len(decoded.BuildSHA256) != 64 {
 		t.Fatalf("report %+v", decoded)
 	}
 	if len(decoded.Verdicts) != 1 || decoded.Verdicts[0].Result != "fail" || decoded.Verdicts[0].Violations != 1 {

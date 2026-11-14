@@ -224,7 +224,7 @@ func TestCheckESLintRealCleanAndViolating(t *testing.T) {
 			t.Fatalf("report carries %q: %s", leaked, body)
 		}
 	}
-	if decoded.ReportVersion != 1 || decoded.ESLintVersion != "10.13.0" || len(decoded.BuildSHA256) != 64 || len(decoded.Paths) != 2 {
+	if decoded.ReportVersion != 2 || decoded.ESLintVersion != "10.13.0" || len(decoded.BuildSHA256) != 64 || len(decoded.Paths) != 2 {
 		t.Fatalf("report %+v", decoded)
 	}
 	if len(decoded.Verdicts) != 2 || decoded.Verdicts[0].Result != "fail" || decoded.Verdicts[0].Violations != 1 || decoded.Verdicts[1].Violations != 1 {

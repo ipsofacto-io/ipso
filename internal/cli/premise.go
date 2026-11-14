@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ipsofacto-io/ipso/internal/compiler"
 	"github.com/ipsofacto-io/ipso/internal/config"
 	"github.com/ipsofacto-io/ipso/internal/edr"
 	"github.com/ipsofacto-io/ipso/internal/premise"
@@ -156,6 +155,10 @@ func premiseLine(path, id string, result premise.Result) string {
 	return fmt.Sprintf("%s: %s: %s", path, id, result.Result)
 }
 
+// premiseReportVersion is the version of the premise report, which is not a verdict report and keeps its shape
+// when the verdict report changes (ADR-0122).
+const premiseReportVersion = 1
+
 type premiseReport struct {
 	ReportVersion int          `json:"report_version"`
 	IpsoVersion   string       `json:"ipso_version"`
@@ -195,7 +198,7 @@ func writePremiseReport(path string, now time.Time, rows []premiseRow, stderr io
 		rows = []premiseRow{}
 	}
 	raw, err := json.MarshalIndent(premiseReport{
-		ReportVersion: compiler.ReportVersion,
+		ReportVersion: premiseReportVersion,
 		IpsoVersion:   Version,
 		EvaluatedAt:   now.UTC().Truncate(time.Second),
 		Premises:      rows,

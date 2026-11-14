@@ -222,7 +222,7 @@ func TestCheckGatekeeperRealCleanAndViolating(t *testing.T) {
 			t.Fatalf("report carries %q: %s", leaked, body)
 		}
 	}
-	if decoded.ReportVersion != 1 || decoded.GatorVersion != "3.23.1" || len(decoded.BuildSHA256) != 64 || len(decoded.Paths) != 1 || decoded.Paths[0] != "apps" {
+	if decoded.ReportVersion != 2 || decoded.GatorVersion != "3.23.1" || len(decoded.BuildSHA256) != 64 || len(decoded.Paths) != 1 || decoded.Paths[0] != "apps" {
 		t.Fatalf("report %+v", decoded)
 	}
 	if len(decoded.Verdicts) != 1 || decoded.Verdicts[0].Result != "fail" || decoded.Verdicts[0].Violations != 1 {

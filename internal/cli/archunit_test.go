@@ -224,7 +224,7 @@ func TestCheckArchunitRealCleanAndViolating(t *testing.T) {
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.ReportVersion != 1 || decoded.ArchUnitVersion != "1.5.1" || len(decoded.BuildSHA256) != 64 || len(decoded.Paths) != 1 || decoded.Paths[0] != "target/classes" {
+	if decoded.ReportVersion != 2 || decoded.ArchUnitVersion != "1.5.1" || len(decoded.BuildSHA256) != 64 || len(decoded.Paths) != 1 || decoded.Paths[0] != "target/classes" {
 		t.Fatalf("report %+v", decoded)
 	}
 	if len(decoded.Verdicts) != 1 || decoded.Verdicts[0].Result != "fail" || decoded.Verdicts[0].Violations != 5 {

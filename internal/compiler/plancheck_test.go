@@ -1,8 +1,11 @@
 package compiler
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -196,5 +199,56 @@ func TestLoadBuildMissing(t *testing.T) {
 	_, err := LoadBuild(t.TempDir())
 	if CodeOf(err) != CodeBuildMissing {
 		t.Fatalf("code %q err %v", CodeOf(err), err)
+	}
+}
+
+// The digests of a verdict are all or none (ADR-0122): the control plane reads them as the whole of the check.
+func TestJudgeListsTheDigestsOfEveryViolationOrNone(t *testing.T) {
+	digest := func(c byte) string { return strings.Repeat(string(c), 64) }
+	entry := Entry{DecisionID: "01M5C5QEHHNXJ3D7X2ZCMGXQT7", Slug: "ebs", CheckIndex: 2, Mode: "block"}
+	violation := func(fingerprint string, covered bool) Violation {
+		return Violation{Fingerprint: fingerprint, Baselined: covered}
+	}
+	cases := []struct {
+		name       string
+		outcome    Outcome
+		result     string
+		violations int
+		want       []string
+	}{
+		{"every violation covered", Outcome{Violations: []Violation{violation(digest('c'), true), violation(digest('a'), true)}}, "waived", 2, []string{digest('a'), digest('c')}},
+		{"one uncovered", Outcome{Violations: []Violation{violation(digest('c'), true), violation(digest('b'), false)}}, "fail", 1, []string{digest('b'), digest('c')}},
+		{"none covered", Outcome{Violations: []Violation{violation(digest('b'), false)}}, "fail", 1, []string{digest('b')}},
+		{"one has no digest", Outcome{Violations: []Violation{violation(digest('a'), true), violation("", false)}}, "fail", 1, nil},
+		{"no digest at all", Outcome{Violations: []Violation{violation("", false)}}, "fail", 1, nil},
+		{"a waiver covers the check", Outcome{Waived: true, Violations: []Violation{violation(digest('a'), false)}}, "waived", 1, nil},
+		{"the check failed to evaluate", Outcome{Err: errors.New("no engine"), Violations: []Violation{violation(digest('a'), false)}}, "error", 0, nil},
+		{"no violation", Outcome{}, "pass", 0, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			verdict, _ := Judge(entry, c.outcome)
+			if verdict.Result != c.result || verdict.Violations != c.violations || !slices.Equal(verdict.Fingerprints, c.want) {
+				t.Errorf("verdict = %+v, want %s with %d violations and digests %v", verdict, c.result, c.violations, c.want)
+			}
+		})
+	}
+}
+
+// A report writes an empty list and never null, so a version 2 verdict always has the key.
+func TestAReportWritesAnEmptyListOfDigestsAndKeepsTheOrder(t *testing.T) {
+	raw, err := MarshalReport(PlanReport{ReportVersion: ReportVersion, Verdicts: []Verdict{
+		{DecisionID: "B", CheckIndex: 0, Result: "pass"},
+		{DecisionID: "A", CheckIndex: 1, Result: "fail", Violations: 1, Fingerprints: []string{strings.Repeat("a", 64)}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "null") || strings.Count(text, `"fingerprints"`) != 2 || !strings.Contains(text, `"fingerprints": []`) || ReportVersion != 2 {
+		t.Errorf("report:\n%s", text)
+	}
+	if strings.Index(text, `"A"`) > strings.Index(text, `"B"`) {
+		t.Errorf("verdicts are not sorted by decision id:\n%s", text)
 	}
 }
