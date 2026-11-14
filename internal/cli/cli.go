@@ -144,6 +144,7 @@ usage:
   ipso deliver <accepted-checks.json|->
   ipso premise check [--report file]
   ipso baseline create|update <subcommand> <args>
+  ipso baseline export <decision-id>
   ipso bundle pack --layout dir
   ipso bundle sign --layout dir --key private.pem
   ipso bundle verify --layout dir --digest sha256:hex --key public.pem

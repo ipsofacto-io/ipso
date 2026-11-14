@@ -1,6 +1,7 @@
 package baseline
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -315,4 +316,64 @@ func FuzzParse(f *testing.F) {
 			t.Fatalf("a parsed file did not marshal: %v", err)
 		}
 	})
+}
+
+func exportFile() File {
+	low, mid, high := strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)
+	return File{Version: fileVersion, Salt: testSalt, Checks: []Check{
+		{DecisionID: "a", CheckIndex: 1, Env: "prod", Fingerprints: []string{high}},
+		{DecisionID: "a", CheckIndex: 0, Input: "stack-a", Fingerprints: []string{mid}},
+		{DecisionID: "a", CheckIndex: 0, Fingerprints: []string{}},
+		{DecisionID: "b", CheckIndex: 0, Fingerprints: []string{low}},
+		{DecisionID: "c", CheckIndex: 0, Fingerprints: []string{}},
+	}}
+}
+
+func TestExportIsTheSortedUnionOfOneDecision(t *testing.T) {
+	got, err := exportFile().Export("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{strings.Repeat("b", 64), strings.Repeat("c", 64)}
+	if got.Version != ExportVersion || got.DecisionID != "a" || strings.Join(got.Fingerprints, ",") != strings.Join(want, ",") {
+		t.Fatalf("export %+v, want %v", got, want)
+	}
+}
+
+func TestExportRefusesWhatCannotBeUploaded(t *testing.T) {
+	if _, err := exportFile().Export("missing"); !errors.Is(err, ErrNoEntry) {
+		t.Fatalf("a decision with no entry: %v", err)
+	}
+	if _, err := exportFile().Export("c"); !errors.Is(err, ErrEmpty) {
+		t.Fatalf("a decision with only empty entries: %v", err)
+	}
+	if _, err := exportFile().Export(""); !errors.Is(err, ErrNoEntry) {
+		t.Fatalf("an empty id: %v", err)
+	}
+}
+
+func TestExportHoldsOnlyTheThreeKeysAndNoSalt(t *testing.T) {
+	got, err := exportFile().Export("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := got.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 3 || keys["baseline_export_version"] == nil || keys["decision_id"] == nil || keys["fingerprints"] == nil {
+		t.Fatalf("keys %v", keys)
+	}
+	for _, leak := range []string{testSalt, "check_index", "env", "input", "prod", "stack-a", strings.Repeat("a", 64)} {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("the export holds %q:\n%s", leak, raw)
+		}
+	}
+	if !strings.HasSuffix(string(raw), "\n") || !strings.Contains(string(raw), strings.Repeat("b", 64)+"\",\n") {
+		t.Fatalf("fingerprints are not one per line:\n%s", raw)
+	}
 }

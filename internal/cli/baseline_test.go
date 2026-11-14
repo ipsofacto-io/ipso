@@ -3,8 +3,10 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -777,6 +779,94 @@ func TestSARIFCategoryNamesTheInput(t *testing.T) {
 		got, _ := readSARIF(t, output)
 		if id := got.Runs[0].AutomationDetails.ID; id != tc.want {
 			t.Fatalf("%v: category %q", tc.args, id)
+		}
+	}
+}
+
+// tree lists every file under root with its size, so a test can see that a command wrote nothing.
+func tree(t *testing.T, root string) []string {
+	t.Helper()
+	var listed []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		listed = append(listed, fmt.Sprintf("%s %d", path, info.Size()))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return listed
+}
+
+func TestBaselineExportWritesTheDigestsWithoutTheSalt(t *testing.T) {
+	root := planRepo(t, baselinePlanCheck)
+	if stdout, stderr, code := baselineAt(t, "create", "plan", "plan.json"); code != 0 {
+		t.Fatalf("create %d\n%s\n%s", code, stdout, stderr)
+	}
+	file := readBaseline(t, root)
+	if len(file.Checks) != 1 || file.Checks[0].DecisionID != idA || len(file.Checks[0].Fingerprints) == 0 {
+		t.Fatalf("file %+v", file.Checks)
+	}
+	before := tree(t, root)
+
+	stdout, stderr, code := baselineAt(t, "export", idA)
+	if code != 0 || stderr != "" {
+		t.Fatalf("export %d\n%s\n%s", code, stdout, stderr)
+	}
+	var got baseline.Export
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("%v\n%s", err, stdout)
+	}
+	if got.Version != 1 || got.DecisionID != idA || !slices.Equal(got.Fingerprints, file.Checks[0].Fingerprints) {
+		t.Fatalf("export %+v, want the fingerprints %v", got, file.Checks[0].Fingerprints)
+	}
+	if strings.Contains(stdout, file.Salt) {
+		t.Fatalf("the export holds the salt:\n%s", stdout)
+	}
+	if after := tree(t, root); !slices.Equal(before, after) {
+		t.Fatalf("export wrote a file:\n%v\n%v", before, after)
+	}
+}
+
+func TestBaselineExportRefusesWhatCannotBeUploaded(t *testing.T) {
+	root := planRepo(t, baselinePlanCheck)
+	if _, stderr, code := baselineAt(t, "export", idA); code != 1 || !strings.Contains(stderr, "ipso baseline create") {
+		t.Fatalf("no file: %d %s", code, stderr)
+	}
+	writeRepoFile(t, root, "plan.json", strings.Replace(planBody, `"encrypted":false`, `"encrypted":true`, 1))
+	if _, stderr, code := baselineAt(t, "create", "plan", "plan.json"); code != 0 {
+		t.Fatalf("create %d %s", code, stderr)
+	}
+	stdout, stderr, code := baselineAt(t, "export", idA)
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "nothing to upload") {
+		t.Fatalf("an empty entry: %d\n%s\n%s", code, stdout, stderr)
+	}
+	stdout, stderr, code = baselineAt(t, "export", "01M5C5QEHHNXJ3D7X2ZCMGXQT8")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "has no entry for decision") {
+		t.Fatalf("another decision: %d\n%s\n%s", code, stdout, stderr)
+	}
+	_, stderr, code = baselineAt(t, "export", "a\x1b[31mb")
+	if code != 1 || strings.Contains(stderr, "\x1b") {
+		t.Fatalf("a control character reached the terminal: %d %q", code, stderr)
+	}
+	writeRepoFile(t, root, baseline.RelPath, "nope")
+	if stdout, stderr, code := baselineAt(t, "export", idA); code != 1 || stdout != "" || !strings.Contains(stderr, baseline.CodeFile) {
+		t.Fatalf("a damaged file: %d\n%s\n%s", code, stdout, stderr)
+	}
+}
+
+func TestBaselineExportUsage(t *testing.T) {
+	planRepo(t, baselinePlanCheck)
+	for _, args := range [][]string{{"export"}, {"export", ""}, {"export", idA, "extra"}} {
+		stdout, stderr, code := baselineAt(t, args...)
+		if code != 2 || stdout != "" || !strings.Contains(stderr, "ipso baseline export <decision-id>") {
+			t.Fatalf("args %q code %d stdout %q stderr %q", args, code, stdout, stderr)
 		}
 	}
 }

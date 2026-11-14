@@ -62,8 +62,23 @@ ipso check plan prod.json --env prod
 - Renaming an input means creating its baseline again.
 - One decision holds at most 100,000 fingerprints across all its inputs.
 
+## Upload a baseline to the control plane
+
+The control plane applies a decision's grandfather terms to the baseline you record there, and the CLI never opens a connection, so the upload is two steps (ADR-0121).
+
+```bash
+ipso baseline export 01M5C5QEHHNXJ3D7X2ZCMGXQT7 > baseline-export.json
+```
+
+`export` takes the id of the decision's EDR file, reads `.ipso/baseline.json`, and prints the fingerprints of every check, environment and input of that decision as one sorted list. It prints no salt, check index, environment or input name, writes no file, and runs no check. Then a person with the decision-owner role opens **Record a baseline** on the decision in the web app, types the repository as `owner/name`, and chooses the file.
+
+- A decision with no entry in the file, or only empty entries, prints nothing and exits `1`.
+- The web app refuses a file made for another decision, and a body over 1 MiB, which is about 15,600 fingerprints. It sends nothing in either case.
+- A baseline is recorded once for a decision and a repository, and neither the app nor `ipso baseline update` changes it afterwards. Review the local file before you export it.
+- A decision needs its grandfather terms first, which the supersession page records.
+
 ## Protecting the file
 
 Anyone who can commit can edit `.ipso/baseline.json` and waive a violation, so put it under `CODEOWNERS`. A signed bundle pins the baseline it was packed with, so editing the file afterwards does not change a `--bundle` check.
 
-The file holds a random salt. Repository readers can see it, and it is never uploaded, so a server that stores fingerprints cannot confirm a guessed path. The manifest carries the salt too, so treat a bundle with a baseline as you would the repository. If you delete the file and create it again, the new salt no longer matches any baseline already stored on a server.
+The file holds a random salt. Repository readers can see it, and it is never uploaded (`ipso baseline export` leaves it out), so a server that stores fingerprints cannot confirm a guessed path. The manifest carries the salt too, so treat a bundle with a baseline as you would the repository. If you delete the file and create it again, the new salt no longer matches any baseline already stored on a server.

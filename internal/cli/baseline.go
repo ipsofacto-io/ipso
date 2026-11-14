@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 	"github.com/ipsofacto-io/ipso/internal/sarif"
 )
 
-const baselineUsage = "usage: ipso baseline create|update <subcommand> <args>\nsubcommands: plan, checkov, pulumi, cloudformation, arm, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, eslint\nargs are those of ipso check. --env and --input name the input, and a check holds one baseline per input."
+const baselineUsage = "usage: ipso baseline create|update <subcommand> <args>\n       ipso baseline export <decision-id>\nsubcommands: plan, checkov, pulumi, cloudformation, arm, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, eslint\nargs are those of ipso check. --env and --input name the input, and a check holds one baseline per input."
 
 func adapterRunner(check adapterCheck) checkRunner {
 	return func(root string, args []string, stdout, stderr io.Writer, d deps) int {
@@ -49,6 +50,9 @@ var baselineRunners = map[string]checkRunner{
 // checks with no entry. update only removes fingerprints that no longer occur. Nothing is written when
 // any check fails to evaluate.
 func baselineCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
+	if len(args) > 0 && args[0] == "export" {
+		return baselineExportCmd(root, args[1:], stdout, stderr)
+	}
 	if len(args) < 2 || (args[0] != "create" && args[0] != "update") {
 		fprintln(stderr, baselineUsage)
 		return 2
@@ -128,6 +132,47 @@ func baselineCmd(root string, args []string, stdout, stderr io.Writer, d deps) i
 		return 1
 	}
 	fprintf(stdout, "wrote %s, run ipso compile to apply it\n", baseline.RelPath)
+	return 0
+}
+
+// baselineExportCmd writes the fingerprints of one decision to stdout, without the salt, so a person can
+// upload them from the web app (ADR-0121). It reads the local file, runs no check, writes no file and opens
+// no connection. The decision is named by the id of its EDR file, as the local file names it.
+func baselineExportCmd(root string, args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || args[0] == "" {
+		fprintln(stderr, baselineUsage)
+		return 2
+	}
+	file, found, err := baseline.Read(root)
+	if err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
+	if !found {
+		fprintf(stderr, "%s does not exist, run ipso baseline create\n", baseline.RelPath)
+		return 1
+	}
+	exported, err := file.Export(args[0])
+	switch {
+	case errors.Is(err, baseline.ErrNoEntry):
+		fprintf(stderr, "%s has no entry for decision %s, run ipso baseline create\n", baseline.RelPath, compiler.EscapeControls(args[0]))
+		return 1
+	case errors.Is(err, baseline.ErrEmpty):
+		fprintf(stderr, "every entry of decision %s in %s is empty, so there is nothing to upload\n", compiler.EscapeControls(args[0]), baseline.RelPath)
+		return 1
+	case err != nil:
+		fprintln(stderr, err)
+		return 1
+	}
+	raw, err := exported.Marshal()
+	if err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
+	if _, err := stdout.Write(raw); err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
 	return 0
 }
 
