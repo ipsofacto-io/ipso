@@ -1,4 +1,6 @@
 # The plan fixture is the input the checks are tested against, so it violates them on purpose.
+# Path-scoped exceptions live in .trivyignore.yaml.
+ignorefile: .trivyignore.yaml
 scan:
   skip-dirs:
     - internal/compiler/opa/testdata/plans
