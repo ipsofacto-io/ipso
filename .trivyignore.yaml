@@ -1,0 +1,13 @@
+vulnerabilities:
+  - id: CVE-2026-112366
+    paths:
+      - internal/compiler/depcruise/testdata/tool/package-lock.json
+      - internal/compiler/eslint/testdata/tool/package-lock.json
+    expired_at: 2027-02-17
+    statement: picomatch through 4.0.7 has no patched release. These copies are transitive dependencies of the private dependency-cruiser and ESLint test installs, and they are not in the release binary.
+  - id: GHSA-fc5q-39xc-vjpf
+    paths:
+      - internal/compiler/depcruise/testdata/tool/package-lock.json
+      - internal/compiler/eslint/testdata/tool/package-lock.json
+    expired_at: 2027-02-17
+    statement: picomatch through 4.0.7 has no patched release. These copies are transitive dependencies of the private dependency-cruiser and ESLint test installs, and they are not in the release binary.
