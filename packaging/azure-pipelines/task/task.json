@@ -1,0 +1,70 @@
+{
+  "id": "580d6da4-f778-4360-982d-d3a8f0a0daa7",
+  "name": "IpsoCheck",
+  "friendlyName": "ipso decision check",
+  "description": "Run an ipso decision check and leave its SARIF file and verdict report for the pipeline to publish.",
+  "helpMarkDown": "Linux and macOS agents only. The task installs ipso 0.4.0 after a sha256 check, or uses cli-path. It holds no Azure credential.",
+  "category": "Utility",
+  "author": "ipsofacto-io",
+  "version": {
+    "Major": 1,
+    "Minor": 0,
+    "Patch": 0
+  },
+  "instanceNameFormat": "ipso check $(command)",
+  "minimumAgentVersion": "2.214.1",
+  "inputs": [
+    {
+      "name": "command",
+      "type": "string",
+      "label": "Command",
+      "required": true,
+      "helpMarkDown": "The engine check to run. One of plan, ci, checkov, pulumi, cloudformation, arm, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, or eslint."
+    },
+    {
+      "name": "args",
+      "type": "string",
+      "label": "Arguments",
+      "defaultValue": "",
+      "required": false,
+      "helpMarkDown": "Arguments of that check, such as the plan file. They are split on whitespace and no shell expands them."
+    },
+    {
+      "name": "env",
+      "type": "string",
+      "label": "Environment",
+      "defaultValue": "",
+      "required": false,
+      "helpMarkDown": "Environment name, passed as --env."
+    },
+    {
+      "name": "input",
+      "type": "string",
+      "label": "Input",
+      "defaultValue": "",
+      "required": false,
+      "helpMarkDown": "Input name, passed as --input."
+    },
+    {
+      "name": "version",
+      "type": "string",
+      "label": "Version",
+      "defaultValue": "0.4.0",
+      "required": false,
+      "helpMarkDown": "The ipso release to install, without the leading v. Only 0.4.0 is accepted."
+    },
+    {
+      "name": "cli-path",
+      "type": "string",
+      "label": "CLI path",
+      "defaultValue": "",
+      "required": false,
+      "helpMarkDown": "Path of an ipso binary already on the agent. The task then installs nothing and does not check a hash."
+    }
+  ],
+  "execution": {
+    "Node20_1": {
+      "target": "index.js"
+    }
+  }
+}
