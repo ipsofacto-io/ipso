@@ -49,6 +49,10 @@ The task in [`packaging/azure-pipelines`](packaging/azure-pipelines) runs one ch
 
 The component in [`packaging/gitlab`](packaging/gitlab) runs one check on a Linux or macOS runner, fails the job on a violation, and publishes a Code Quality report. [docs/gitlab.md](docs/gitlab.md) has the example, the pin, and the token rules. Publishing the catalog release is a manual step, and the example pipeline has not been run on GitLab.
 
+## Backstage
+
+The plugin in [`packaging/backstage`](packaging/backstage) shows the decisions in force for a catalog entity and how many of them have passing checks. The person token stays on the Backstage backend. Publishing to npm is a manual step, and this repository does not start a Backstage app.
+
 ## Atlantis
 
 A server-side Atlantis workflow runs `ipso check plan` in the plan stage and removes the plan file on a failed verdict, so `atlantis apply` has nothing to apply. [docs/atlantis.md](docs/atlantis.md) has the workflow.

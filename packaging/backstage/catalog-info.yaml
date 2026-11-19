@@ -1,0 +1,10 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: payments
+  annotations:
+    ipsofacto.io/repo: acme/payments
+    ipsofacto.io/env: prod
+    github.com/project-slug: acme/payments
+spec:
+  type: service
