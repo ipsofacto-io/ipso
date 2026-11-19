@@ -84,7 +84,7 @@ func decodeEvidence(raw []byte) (Evidence, error) {
 		if !validID(item.ID) {
 			return Evidence{}, &compiler.Error{Code: CodeFormat, Err: fmt.Errorf("finding id %q", item.ID)}
 		}
-		findings = append(findings, Finding{ID: item.ID})
+		findings = append(findings, Finding(item))
 	}
 	return Evidence{Tool: doc.Tool, Status: doc.Status, Findings: findings}, nil
 }
