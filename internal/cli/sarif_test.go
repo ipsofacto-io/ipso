@@ -170,6 +170,10 @@ func TestEverySubcommandWritesSARIF(t *testing.T) {
 		{"plan", "opa", "terraform-plan", []string{"input.json"}},
 		{"ci", "ci-binding", "ci", []string{"evidence.json", "--sha", strings.Repeat("a", 40)}},
 		{"checkov", "checkov", "terraform", []string{"input.json"}},
+		{"snyk", "snyk", "code", []string{"findings.json"}},
+		{"wiz", "wiz", "code", []string{"findings.json"}},
+		{"sonarqube", "sonarqube", "code", []string{"findings.json"}},
+		{"dependabot", "dependabot", "code", []string{"findings.json"}},
 		{"depcruise", "depcruise", "code", []string{"."}},
 		{"semgrep", "semgrep", "code", []string{"."}},
 		{"archunit", "archunit", "code", []string{".", "--jars", "."}},
@@ -188,6 +192,7 @@ func TestEverySubcommandWritesSARIF(t *testing.T) {
 			writeRepoFile(t, root, ".ipso/build/manifest.json", manifest)
 			writeRepoFile(t, root, "input.json", planBody)
 			writeRepoFile(t, root, "evidence.json", `{"evidence_version":1,"sha":"`+strings.Repeat("a", 40)+`","jobs":[]}`)
+			writeRepoFile(t, root, "findings.json", `{"evidence_version":1,"tool":"`+tc.name+`","status":"success","findings":[]}`)
 			output := filepath.Join(root, "out.sarif")
 			var stdout, stderr strings.Builder
 			args := append(append([]string{"check", tc.name}, tc.args...), "--sarif", output)

@@ -24,8 +24,8 @@ esac
 [[ "${IPSO_TEMP:-}" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "IPSO_TEMP is missing or not a safe path"
 
 case "${IPSO_COMMAND:-}" in
-  plan | ci | checkov | pulumi | cloudformation | arm | depcruise | semgrep | archunit | importlinter | kyverno | gatekeeper | eslint) ;;
-  *) fail "command must be plan, ci, checkov, pulumi, cloudformation, arm, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, or eslint" ;;
+  plan | ci | checkov | snyk | wiz | sonarqube | dependabot | pulumi | cloudformation | arm | depcruise | semgrep | archunit | importlinter | kyverno | gatekeeper | eslint) ;;
+  *) fail "command must be plan, ci, checkov, snyk, wiz, sonarqube, dependabot, pulumi, cloudformation, arm, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, or eslint" ;;
 esac
 
 args=()

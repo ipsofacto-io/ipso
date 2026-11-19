@@ -20,6 +20,7 @@ import (
 	"github.com/ipsofacto-io/ipso/internal/compiler/cibinding"
 	"github.com/ipsofacto-io/ipso/internal/compiler/depcruise"
 	"github.com/ipsofacto-io/ipso/internal/compiler/eslint"
+	"github.com/ipsofacto-io/ipso/internal/compiler/findings"
 	"github.com/ipsofacto-io/ipso/internal/compiler/gatekeeper"
 	"github.com/ipsofacto-io/ipso/internal/compiler/importlinter"
 	"github.com/ipsofacto-io/ipso/internal/compiler/kyverno"
@@ -129,6 +130,10 @@ usage:
   ipso check plan <plan.json|-> [--env name] [--input name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]
   ipso check ci <evidence.json|-> --sha <sha> [--env name] [--report file] [--sarif file]
   ipso check checkov <results.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check snyk <evidence.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check wiz <evidence.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check sonarqube <evidence.json|-> [--env name] [--input name] [--report file] [--sarif file]
+  ipso check dependabot <evidence.json|-> [--env name] [--input name] [--report file] [--sarif file]
   ipso check pulumi <preview.json|-> [--env name] [--input name] [--report file] [--sarif file]
   ipso check cloudformation <template|-> [--env name] [--input name] [--report file] [--sarif file]
   ipso check arm <template.json|-> [--env name] [--input name] [--report file] [--sarif file]
@@ -181,6 +186,8 @@ func checkCmd(root string, args []string, stdout, stderr io.Writer, d deps) int 
 		return ciCmd(root, args[1:], stdout, stderr, d)
 	case "checkov":
 		return checkovCmd(root, args[1:], stdout, stderr, d)
+	case "snyk", "wiz", "sonarqube", "dependabot":
+		return findingCmd(root, args[0], args[1:], stdout, stderr, d)
 	case "pulumi":
 		return adapterCmd(root, args[1:], pulumiCheck, stdout, stderr, d)
 	case "cloudformation":
@@ -251,6 +258,10 @@ const (
 	planUsage         = "usage: ipso check plan <plan.json|-> [--env name] [--input name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]"
 	ciUsage           = "usage: ipso check ci <evidence.json|-> --sha <sha> [--env name] [--report file] [--sarif file]"
 	checkovUsage      = "usage: ipso check checkov <results.json|-> [--env name] [--input name] [--report file] [--sarif file]"
+	snykUsage         = "usage: ipso check snyk <evidence.json|-> [--env name] [--input name] [--report file] [--sarif file]"
+	wizUsage          = "usage: ipso check wiz <evidence.json|-> [--env name] [--input name] [--report file] [--sarif file]"
+	sonarqubeUsage    = "usage: ipso check sonarqube <evidence.json|-> [--env name] [--input name] [--report file] [--sarif file]"
+	dependabotUsage   = "usage: ipso check dependabot <evidence.json|-> [--env name] [--input name] [--report file] [--sarif file]"
 	depcruiseUsage    = "usage: ipso check depcruise <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	semgrepUsage      = "usage: ipso check semgrep <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	archunitUsage     = "usage: ipso check archunit <classes-dir>... --jars <dir> [--env name] [--input name] [--report file] [--sarif file]"
@@ -258,7 +269,7 @@ const (
 	kyvernoUsage      = "usage: ipso check kyverno <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	gatekeeperUsage   = "usage: ipso check gatekeeper <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	eslintUsage       = "usage: ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]"
-	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + pulumiUsage + "\n" + cloudformationUsage + "\n" + armUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage
+	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + snykUsage + "\n" + wizUsage + "\n" + sonarqubeUsage + "\n" + dependabotUsage + "\n" + pulumiUsage + "\n" + cloudformationUsage + "\n" + armUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage
 )
 
 func planCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
@@ -452,6 +463,80 @@ func checkovCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 		return 1
 	}
 	return 0
+}
+
+func findingCmd(root, tool string, args []string, stdout, stderr io.Writer, d deps) int {
+	opts, err := parseBoundArgs(args, findingUsage(tool), false)
+	if err != nil {
+		fprintln(stderr, err)
+		return 2
+	}
+	if d.now == nil {
+		d.now = time.Now
+	}
+	reader, err := openInput(opts.path)
+	if err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
+	defer func() { _ = reader.Close() }()
+	evidence, err := findings.ReadEvidence(reader, tool)
+	if err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
+	build, err := compiler.LoadBuild(root)
+	if err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
+	now := d.now()
+	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
+		return entry.Engine == tool && entry.Applies(opts.env, now)
+	}, func(entry compiler.Entry, artifacts map[string][]byte) compiler.Outcome {
+		return findings.EvalCheck(entry, artifacts, evidence, now)
+	})
+	if err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
+	if selected == 0 {
+		fprintln(stdout, "no checks selected")
+	}
+	report := compiler.FindingsReport{
+		ReportVersion:  compiler.ReportVersion,
+		IpsoVersion:    Version,
+		EvaluatedAt:    now.UTC(),
+		Env:            opts.env,
+		EvidenceSHA256: evidence.SHA256(),
+		BuildSHA256:    build.SHA256(),
+		Verdicts:       verdicts,
+	}
+	if err := writeOutputs(opts.report, opts.sarif, sarif.Category(tool, opts.env, opts.input), checks, func() ([]byte, error) {
+		return compiler.MarshalFindingsReport(report)
+	}); err != nil {
+		fprintln(stderr, err)
+		return 1
+	}
+	if failed {
+		return 1
+	}
+	return 0
+}
+
+func findingUsage(tool string) string {
+	switch tool {
+	case "snyk":
+		return snykUsage
+	case "wiz":
+		return wizUsage
+	case "sonarqube":
+		return sonarqubeUsage
+	case "dependabot":
+		return dependabotUsage
+	default:
+		return checkUsage
+	}
 }
 
 func semgrepCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {

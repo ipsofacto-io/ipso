@@ -41,7 +41,7 @@ Run the job without production secrets where you can. The report carries the pla
 
 A step runs `ipso check`, then `ipso compile`, then `ipso check <command> <args> --report <file> --sarif <file>`. `--bundle` in `args` skips the compile. The first command that fails stops the run. When the check wrote files, they are still there, and then the task exits with the check's code.
 
-`command` is one of `plan`, `ci`, `checkov`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, or `eslint`. `args` is split on whitespace and no shell expands it. `args` cannot set `--report`, `--sarif`, `--env`, or `--input`. `env` and `input` become those flags.
+`command` is one of `plan`, `ci`, `checkov`, `snyk`, `wiz`, `sonarqube`, `dependabot`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, or `eslint`. `args` is split on whitespace and no shell expands it. `args` cannot set `--report`, `--sarif`, `--env`, or `--input`. `env` and `input` become those flags. `snyk`, `wiz`, `sonarqube`, and `dependabot` read an evidence file the job wrote. The task does not run those scanners. The 0.4.0 release the task installs does not contain those four commands, so set `cli-path` to a binary that does.
 
 `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, and `eslint` need their pinned engine on `PATH`. Install it in an earlier step. The task does not install engines.
 
