@@ -35,7 +35,7 @@ A report written with `--report` is version 2. Each verdict also holds `fingerpr
 
 ## What cannot be baselined
 
-`ipso check ci` results and Checkov's `check not reported` mean a control did not run, so a baseline would switch that control off. They stay failures, and `create` reports how many it skipped. `ipso baseline create ci` is refused. Use a waiver with an expiry instead.
+`ipso check ci` results and Checkov's `check not reported` mean a control did not run, so a baseline would switch that control off. They stay failures, and `create` reports how many it skipped. `ipso baseline create ci` is refused. Use a waiver with an expiry instead. Snyk, Wiz, SonarQube, and Dependabot are refused too. An open finding has no file or resource to fingerprint, and a waiver with an expiry is how that advisory is accepted for a period.
 
 ## What a fingerprint covers
 

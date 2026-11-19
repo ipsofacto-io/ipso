@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "decision_id": "01M5C5QEHHNXJ3D7X2ZCMGXQT7",
+      "slug": "no-open-lodash-advisory",
+      "check_index": 0,
+      "engine": "snyk",
+      "mode": "block",
+      "target": "code",
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "env": null,
+      "waivers": [],
+      "compiler": "snyk",
+      "compiler_version": "1",
+      "artifacts": [
+        {
+          "name": "binding.json",
+          "sha256": "0d3e24ab9dcea51139f9c50ff58bcba14030cb067abd2ccc0f6479afeecbc479"
+        }
+      ]
+    }
+  ]
+}

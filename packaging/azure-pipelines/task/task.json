@@ -19,7 +19,7 @@
       "type": "string",
       "label": "Command",
       "required": true,
-      "helpMarkDown": "The engine check to run. One of plan, ci, checkov, pulumi, cloudformation, arm, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, or eslint."
+      "helpMarkDown": "The engine check to run. One of plan, ci, checkov, snyk, wiz, sonarqube, dependabot, pulumi, cloudformation, arm, depcruise, semgrep, archunit, importlinter, kyverno, gatekeeper, or eslint."
     },
     {
       "name": "args",

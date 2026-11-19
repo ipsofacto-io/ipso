@@ -45,7 +45,7 @@ Run the plan step without production secrets where you can. Only the verdicts an
 
 A step runs `ipso check`, then `ipso compile`, then `ipso check <command> <args> --report <file> --sarif <file>`. The first command that fails stops the run. The uploads still run for whatever was written, and then the step fails.
 
-`command` is one of the engine checks: `plan`, `ci`, `checkov`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, or `eslint`. `plan`, `ci`, `checkov`, `pulumi`, `cloudformation`, and `arm` need nothing more. The other commands need their pinned engine on `PATH`, so install it in an earlier step.
+`command` is one of the engine checks: `plan`, `ci`, `checkov`, `snyk`, `wiz`, `sonarqube`, `dependabot`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, or `eslint`. `plan`, `ci`, `checkov`, `pulumi`, `cloudformation`, and `arm` need nothing more. `snyk`, `wiz`, `sonarqube`, and `dependabot` read an evidence file the job wrote, and the action does not run the scanner. The default `version` is 0.4.0, which does not contain those four commands, so set `version` or `cli-path` to a build that does. The remaining commands need their pinned engine on `PATH`, so install it in an earlier step.
 
 ## More than one run
 

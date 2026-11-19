@@ -485,6 +485,18 @@ type CheckovReport struct {
 	Verdicts       []Verdict `json:"verdicts"`
 }
 
+// FindingsReport is the verdict report for ipso check snyk, wiz, sonarqube, and dependabot.
+// The keys match CheckovReport so an upload stores the evidence hash and the verdict counts, never a finding id.
+type FindingsReport struct {
+	ReportVersion  int       `json:"report_version"`
+	IpsoVersion    string    `json:"ipso_version"`
+	EvaluatedAt    time.Time `json:"evaluated_at"`
+	Env            string    `json:"env"`
+	EvidenceSHA256 string    `json:"evidence_sha256"`
+	BuildSHA256    string    `json:"build_sha256"`
+	Verdicts       []Verdict `json:"verdicts"`
+}
+
 // AdapterReport is the verdict report for the checks that read another tool's plan or template.
 // It carries the hash of the input as read, never resource names, values, or messages.
 type AdapterReport struct {
@@ -582,6 +594,12 @@ func MarshalCIReport(report CIReport) ([]byte, error) {
 
 // MarshalCheckovReport encodes a Checkov report as deterministic JSON.
 func MarshalCheckovReport(report CheckovReport) ([]byte, error) {
+	report.EvaluatedAt, report.Verdicts = finishReport(report.EvaluatedAt, report.Verdicts)
+	return encodeReport(report)
+}
+
+// MarshalFindingsReport encodes a security-tool report as deterministic JSON.
+func MarshalFindingsReport(report FindingsReport) ([]byte, error) {
 	report.EvaluatedAt, report.Verdicts = finishReport(report.EvaluatedAt, report.Verdicts)
 	return encodeReport(report)
 }

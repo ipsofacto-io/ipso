@@ -3,7 +3,7 @@ package builtin
 import "testing"
 
 func TestRegistry(t *testing.T) {
-	for _, engine := range []string{"opa", "depcruise", "semgrep", "ci-binding", "checkov", "archunit", "importlinter", "kyverno", "eslint"} {
+	for _, engine := range []string{"opa", "depcruise", "semgrep", "ci-binding", "checkov", "snyk", "wiz", "sonarqube", "dependabot", "archunit", "importlinter", "kyverno", "eslint"} {
 		got, ok := Registry().Lookup(engine)
 		if !ok {
 			t.Fatalf("%s compiler is not registered", engine)
