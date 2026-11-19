@@ -1,0 +1,14 @@
+{
+  "name": "@ipsofacto/backstage-plugin",
+  "version": "0.1.0",
+  "description": "Show ipso decisions and passing-check coverage on a Backstage catalog entity.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./lib/handler.mjs",
+    "./card": "./lib/card.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
