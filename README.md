@@ -45,6 +45,10 @@ ipso explain <slug>
 
 The task in [`packaging/azure-pipelines`](packaging/azure-pipelines) runs one check on a Linux or macOS agent and leaves the SARIF file and the verdict report for the pipeline to publish. [docs/azure-pipelines.md](docs/azure-pipelines.md) has the example, the pin, and the Windows refusal. Publishing the extension is a manual step, and the example pipeline has not been run on Azure DevOps.
 
+## GitLab
+
+The component in [`packaging/gitlab`](packaging/gitlab) runs one check on a Linux or macOS runner, fails the job on a violation, and publishes a Code Quality report. [docs/gitlab.md](docs/gitlab.md) has the example, the pin, and the token rules. Publishing the catalog release is a manual step, and the example pipeline has not been run on GitLab.
+
 ## Atlantis
 
 A server-side Atlantis workflow runs `ipso check plan` in the plan stage and removes the plan file on a failed verdict, so `atlantis apply` has nothing to apply. [docs/atlantis.md](docs/atlantis.md) has the workflow.

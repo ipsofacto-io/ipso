@@ -1,0 +1,29 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "aws_s3_bucket.logs",
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "bucket": "logs",
+          "id": "logs"
+        }
+      }
+    },
+    {
+      "address": "aws_s3_bucket_acl.logs",
+      "mode": "managed",
+      "type": "aws_s3_bucket_acl",
+      "change": {
+        "actions": ["create"],
+        "after": {
+          "bucket": "logs",
+          "acl": "private"
+        }
+      }
+    }
+  ]
+}
