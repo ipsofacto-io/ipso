@@ -1,0 +1,34 @@
+{
+  "manifestVersion": 1,
+  "id": "ipso-pipelines",
+  "version": "1.0.0",
+  "name": "ipso decision check",
+  "publisher": "ipsofacto",
+  "public": false,
+  "targets": [
+    {
+      "id": "Microsoft.VisualStudio.Services"
+    }
+  ],
+  "description": "Run an ipso decision check in Azure Pipelines and keep the SARIF file and the verdict report as evidence.",
+  "categories": [
+    "Azure Pipelines"
+  ],
+  "files": [
+    {
+      "path": "task"
+    }
+  ],
+  "contributions": [
+    {
+      "id": "ipso-check",
+      "type": "ms.vss-distributed-task.task",
+      "targets": [
+        "ms.vss-distributed-task.tasks"
+      ],
+      "properties": {
+        "name": "task"
+      }
+    }
+  ]
+}

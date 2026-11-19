@@ -41,6 +41,10 @@ ipso explain <slug>
 
 [`ipsofacto-io/ipso-action`](https://github.com/ipsofacto-io/ipso-action) runs one check in a job, uploads its SARIF file to code scanning, and keeps the evidence as an artifact. [docs/github-action.md](docs/github-action.md) has an example workflow.
 
+## Azure Pipelines
+
+The task in [`packaging/azure-pipelines`](packaging/azure-pipelines) runs one check on a Linux or macOS agent and leaves the SARIF file and the verdict report for the pipeline to publish. [docs/azure-pipelines.md](docs/azure-pipelines.md) has the example, the pin, and the Windows refusal. Publishing the extension is a manual step, and the example pipeline has not been run on Azure DevOps.
+
 ## Atlantis
 
 A server-side Atlantis workflow runs `ipso check plan` in the plan stage and removes the plan file on a failed verdict, so `atlantis apply` has nothing to apply. [docs/atlantis.md](docs/atlantis.md) has the workflow.

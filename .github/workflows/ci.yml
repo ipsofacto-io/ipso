@@ -379,3 +379,40 @@ jobs:
         run: bash internal/compiler/opa/testdata/tool/install.sh
       - name: Run the conformance suite
         run: go test -tags conformance ./internal/compiler/conformance -count=1
+
+  azure-pipelines:
+    name: ci / azure-pipelines
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install shellcheck
+        run: |
+          set -euo pipefail
+          version="0.11.0"
+          archive="shellcheck-v${version}.linux.x86_64.tar.xz"
+          checksum="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+          tmp="${RUNNER_TEMP}/shellcheck-install"
+          mkdir -p "$tmp"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            --output "${tmp}/${archive}" \
+            "https://github.com/koalaman/shellcheck/releases/download/v${version}/${archive}"
+          echo "${checksum}  ${tmp}/${archive}" | sha256sum -c -
+          tar -xJf "${tmp}/${archive}" -C "$tmp" "shellcheck-v${version}/shellcheck"
+          echo "${tmp}/shellcheck-v${version}" >> "$GITHUB_PATH"
+      - name: Lint the task scripts
+        run: shellcheck packaging/azure-pipelines/test.sh packaging/azure-pipelines/verify-pins.sh packaging/azure-pipelines/task/install.sh packaging/azure-pipelines/task/check.sh
+      - name: Run the task tests
+        run: bash packaging/azure-pipelines/test.sh
+      - name: Verify the pinned archives
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash packaging/azure-pipelines/verify-pins.sh
