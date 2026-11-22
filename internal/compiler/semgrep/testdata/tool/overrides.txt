@@ -1,0 +1,4 @@
+# Semgrep 1.182.1 declares mcp==1.29.0, which CVE-2026-115563 affects. Semgrep through 1.186.0 has no release that
+# allows the fixed 1.30.0, and the fixture tests only run `semgrep scan`. Delete this file and regenerate
+# requirements.txt once a Semgrep release allows a fixed mcp.
+mcp==1.30.0
