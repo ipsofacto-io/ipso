@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ipsoplatform.io/schema/edr/v0.2.json",
-  "title": "EDR v0.2 frontmatter",
+  "$id": "https://ipsoplatform.io/schema/edr/v1.json",
+  "title": "EDR 1.0 frontmatter",
   "type": "object",
   "additionalProperties": false,
   "required": [
