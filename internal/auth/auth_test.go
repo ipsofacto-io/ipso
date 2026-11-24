@@ -168,44 +168,21 @@ func TestLoginCallbackReportsFailureWhenTokenExchangeFails(t *testing.T) {
 	}
 }
 
-func TestLoginCallbackIgnoresMalformedStateProbe(t *testing.T) {
-	var seenChallenge string
-	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/auth/cli/start":
-			seenChallenge = r.URL.Query().Get("code_challenge")
+func TestLoginCallbackFailsFastOnMalformedState(t *testing.T) {
+	var callbackStatus int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/cli/start" {
 			redirectURI := r.URL.Query().Get("redirect_uri")
-			state := r.URL.Query().Get("state")
-			// Simulate an unauthenticated local probe with wrong-length state before the real browser callback arrives.
-			probeResp, probeErr := srv.Client().Get(redirectURI + "?code=fake&state=short")
-			if probeErr != nil {
-				t.Fatalf("probe error: %v", probeErr)
-			}
-			_ = probeResp.Body.Close()
-			if probeResp.StatusCode != http.StatusBadRequest {
-				t.Fatalf("probe status = %d, want 400", probeResp.StatusCode)
-			}
-			http.Redirect(w, r, redirectURI+"?code=authcode-ok&state="+url.QueryEscape(state), http.StatusFound)
-		case "/auth/cli/token":
-			_ = r.ParseForm()
-			sum := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
-			if base64.RawURLEncoding.EncodeToString(sum[:]) != seenChallenge {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(TokenResponse{
-				AccessToken: "ipsocli_abcdefghijklmnopqrstuvwxyz123456",
-				ExpiresAt:   time.Date(2026, 12, 24, 15, 0, 0, 0, time.UTC),
-			})
-		default:
-			http.NotFound(w, r)
+			http.Redirect(w, r, redirectURI+"?code=fake&state=short", http.StatusFound)
+			return
 		}
+		http.NotFound(w, r)
 	}))
 	defer srv.Close()
 
-	tok, err := Login(context.Background(), LoginOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := Login(ctx, LoginOptions{
 		ServerURL:  srv.URL,
 		Store:      NewMemoryStore(),
 		HTTPClient: srv.Client(),
@@ -214,19 +191,26 @@ func TestLoginCallbackIgnoresMalformedStateProbe(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			callbackStatus = resp.StatusCode
 			_ = resp.Body.Close()
 			return nil
 		},
 	})
-	if err != nil || tok.AccessToken == "" {
-		t.Fatalf("Login after wrong-length state probe = %+v, err = %v", tok, err)
+	if err == nil {
+		t.Fatal("expected Login to fail fast on wrong-length state")
+	}
+	if callbackStatus != http.StatusBadRequest {
+		t.Fatalf("callback status = %d, want 400", callbackStatus)
 	}
 }
 
-func TestLogoutDeletesLocalCredentialAndReportsServerFailure(t *testing.T) {
+func TestLogoutRetainsCredentialOnServerFailureAndDeletesOnceRevoked(t *testing.T) {
+	status := http.StatusServiceUnavailable
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"title":"unavailable"}`))
+		w.WriteHeader(status)
+		if status >= 500 {
+			_, _ = w.Write([]byte(`{"title":"unavailable"}`))
+		}
 	}))
 	defer srv.Close()
 
@@ -234,11 +218,18 @@ func TestLogoutDeletesLocalCredentialAndReportsServerFailure(t *testing.T) {
 	if err := store.Save(srv.URL, "ipsocli_abcdefghijklmnopqrstuvwxyz123456"); err != nil {
 		t.Fatal(err)
 	}
-	err := Logout(context.Background(), store, srv.Client(), "")
-	if err == nil {
+	if err := Logout(context.Background(), store, srv.Client(), ""); err == nil {
 		t.Fatal("expected Logout to report server-side revocation failure")
 	}
+	if _, resolveErr := Resolve(store, ""); resolveErr != nil {
+		t.Fatalf("expected local credential to remain so user can retry logout, got %v", resolveErr)
+	}
+
+	status = http.StatusUnauthorized
+	if err := Logout(context.Background(), store, srv.Client(), ""); err != nil {
+		t.Fatalf("expected Logout to succeed when server reports session already invalid (401): %v", err)
+	}
 	if _, resolveErr := Resolve(store, ""); resolveErr == nil {
-		t.Fatal("expected local credential to be deleted even when server revocation fails")
+		t.Fatal("expected local credential to be deleted once server reports 401")
 	}
 }

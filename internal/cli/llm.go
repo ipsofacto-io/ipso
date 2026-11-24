@@ -432,9 +432,16 @@ func byollmHTTPClient(base *http.Client, allowLoopback bool) *http.Client {
 		clone.Timeout = 60 * time.Second
 	}
 	clone.CheckRedirect = refuse
-	if !allowLoopback && clone.Transport == nil {
-		if def, ok := http.DefaultTransport.(*http.Transport); ok {
-			tr := def.Clone()
+	if !allowLoopback {
+		var baseTr *http.Transport
+		switch tr := clone.Transport.(type) {
+		case nil:
+			baseTr, _ = http.DefaultTransport.(*http.Transport)
+		case *http.Transport:
+			baseTr = tr
+		}
+		if baseTr != nil {
+			tr := baseTr.Clone()
 			dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 			tr.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 				host, port, err := net.SplitHostPort(address)
@@ -461,9 +468,33 @@ func byollmHTTPClient(base *http.Client, allowLoopback bool) *http.Client {
 				return dialer.DialContext(ctx, network, net.JoinHostPort(firstValid.String(), port))
 			}
 			clone.Transport = tr
+		} else {
+			orig := clone.Transport
+			clone.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				ips, err := net.DefaultResolver.LookupIPAddr(req.Context(), req.URL.Hostname())
+				if err != nil || len(ips) == 0 {
+					if err != nil {
+						return nil, err
+					}
+					return nil, fmt.Errorf("no IP addresses resolved for %s", req.URL.Hostname())
+				}
+				for _, ipAddr := range ips {
+					addr, ok := netip.AddrFromSlice(ipAddr.IP)
+					if !ok || !isPublicUnicastAddr(addr) {
+						return nil, fmt.Errorf("refusing private, loopback, or metadata IP target for BYOLLM host %s", req.URL.Hostname())
+					}
+				}
+				return orig.RoundTrip(req)
+			})
 		}
 	}
 	return &clone
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }
 
 func evaluateBYOLLM(ctx context.Context, httpClient *http.Client, baseURL, modelID, slug string, spec llmcheck.Spec, redactedInput string) (llmcheck.Answer, string, string, error) {

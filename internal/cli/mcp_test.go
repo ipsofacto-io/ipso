@@ -452,4 +452,15 @@ func TestMCPHealthAndVerifiability(t *testing.T) {
 	if ambig.Classification != "ambiguous" {
 		t.Fatalf("expected ambiguous classification, got %+v", ambig)
 	}
+
+	attest, failure := callTool[mcptools.VerifiabilityOutput](t, session, mcptools.ToolVerifiability, mcptools.VerifiabilityInput{
+		Title:     "Hold blameless postmortems",
+		Statement: "Every Sev-1 incident MUST have a blameless postmortem reviewed in a team meeting within 5 business days.",
+	})
+	if failure != "" {
+		t.Fatalf("decisions.verifiability failed: %s", failure)
+	}
+	if attest.Classification != "human_attestation_only" || len(attest.CandidateChecks) != 0 {
+		t.Fatalf("expected human_attestation_only classification, got %+v", attest)
+	}
 }

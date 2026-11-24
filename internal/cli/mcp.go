@@ -507,7 +507,10 @@ func (b *localBackend) Verifiability(_ context.Context, in mcptools.Verifiabilit
 	return localVerifiability(in), nil
 }
 
-var vagueQualifierPattern = regexp.MustCompile(`(?i)\b(where appropriate|when possible|try to|reasonable|best effort|prefer where sensible|as needed)\b`)
+var (
+	vagueQualifierPattern   = regexp.MustCompile(`(?i)\b(where appropriate|when possible|try to|reasonable|best effort|prefer where sensible|as needed)\b`)
+	humanAttestationPattern = regexp.MustCompile(`(?i)\b(postmortem|retrospective|architecture board|committee|manual sign-off|tabletop exercise|team meeting)\b`)
+)
 
 func localVerifiability(in mcptools.VerifiabilityInput) mcptools.VerifiabilityOutput {
 	combined := in.Title + " " + in.Statement + " " + in.Context
@@ -553,6 +556,17 @@ func localVerifiability(in mcptools.VerifiabilityInput) mcptools.VerifiabilityOu
 			MaxAgeDays: 7,
 			Rationale:  "Kubernetes manifests and live cluster exports can be verified with Kyverno policies.",
 		})
+	case humanAttestationPattern.MatchString(combined):
+		return mcptools.VerifiabilityOutput{
+			Classification: "human_attestation_only",
+			Summary:        "Statement governs a human or organizational ceremony rather than an inspectable code or infrastructure artifact.",
+			Suggestions: []string{
+				"Record the decision with status: accepted and checks: [] if human attestation is intended, or rewrite around an inspectable repository artifact.",
+			},
+			CandidateChecks:   []mcptools.CandidateCheck{},
+			CandidatePremises: []mcptools.CandidatePremise{},
+			AIGenerated:       false,
+		}
 	default:
 		checks = append(checks, mcptools.CandidateCheck{
 			Engine:     "llm",
