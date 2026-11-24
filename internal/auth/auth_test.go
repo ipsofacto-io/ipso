@@ -5,12 +5,30 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 )
+
+func redirectLoopbackCallbackForTest(t *testing.T, w http.ResponseWriter, r *http.Request, rawQuery string) {
+	t.Helper()
+	parsed, err := url.Parse(r.URL.Query().Get("redirect_uri"))
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || parsed.Port() == "" || parsed.Path != "/callback" {
+		http.Error(w, "invalid loopback redirect_uri", http.StatusBadRequest)
+		return
+	}
+	target := (&url.URL{
+		Scheme:   "http",
+		Host:     net.JoinHostPort("127.0.0.1", parsed.Port()),
+		Path:     "/callback",
+		RawQuery: rawQuery,
+	}).String()
+	w.Header().Set("Location", target)
+	w.WriteHeader(http.StatusFound)
+}
 
 func TestLoginLoopbackPKCEAndLogout(t *testing.T) {
 	var seenChallenge string
@@ -22,9 +40,8 @@ func TestLoginLoopbackPKCEAndLogout(t *testing.T) {
 			if r.URL.Query().Get("code_challenge_method") != "S256" {
 				t.Errorf("challenge method = %q", r.URL.Query().Get("code_challenge_method"))
 			}
-			redirectURI := r.URL.Query().Get("redirect_uri")
 			state := r.URL.Query().Get("state")
-			http.Redirect(w, r, redirectURI+"?code=authcode-123&state="+url.QueryEscape(state), http.StatusFound)
+			redirectLoopbackCallbackForTest(t, w, r, "code=authcode-123&state="+url.QueryEscape(state))
 		case "/auth/cli/token":
 			if got := r.Header.Get("Content-Type"); got != "application/x-www-form-urlencoded" {
 				t.Fatalf("Content-Type = %q, want application/x-www-form-urlencoded", got)
@@ -134,9 +151,8 @@ func TestLoginCallbackReportsFailureWhenTokenExchangeFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/cli/start":
-			redirectURI := r.URL.Query().Get("redirect_uri")
 			state := r.URL.Query().Get("state")
-			http.Redirect(w, r, redirectURI+"?code=authcode-fail&state="+url.QueryEscape(state), http.StatusFound)
+			redirectLoopbackCallbackForTest(t, w, r, "code=authcode-fail&state="+url.QueryEscape(state))
 		case "/auth/cli/token":
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"title":"invalid_login"}`))
@@ -172,8 +188,7 @@ func TestLoginCallbackFailsFastOnMalformedState(t *testing.T) {
 	var callbackStatus int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/cli/start" {
-			redirectURI := r.URL.Query().Get("redirect_uri")
-			http.Redirect(w, r, redirectURI+"?code=fake&state=short", http.StatusFound)
+			redirectLoopbackCallbackForTest(t, w, r, "code=fake&state=short")
 			return
 		}
 		http.NotFound(w, r)

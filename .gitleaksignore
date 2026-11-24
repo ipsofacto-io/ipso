@@ -1,0 +1,2 @@
+# Synthetic redaction fixture in internal/cli/llm_test.go introduced in PR #75.
+f44899a7adfa5604f6701d41836db7b9058ee119:internal/cli/llm_test.go:generic-api-key:131

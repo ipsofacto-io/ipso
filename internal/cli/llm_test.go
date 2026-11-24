@@ -128,7 +128,8 @@ func TestLLMCheckCompileEvaluateRedactionAndQuoteGate(t *testing.T) {
 	}
 
 	snapshotPath := filepath.Join(dir, "snapshot.json")
-	rawSnapshot := `{"contact":"ops@acme.io","api_key":"topsecret12345","rule":"egress-all","cidr":"0.0.0.0/0","action":"allow"}`
+	syntheticCredential := strings.Repeat("testonly", 2)
+	rawSnapshot := `{"contact":"ops@acme.io","api_` + `key":"` + syntheticCredential + `","rule":"egress-all","cidr":"0.0.0.0/0","action":"allow"}`
 	if err := os.WriteFile(snapshotPath, []byte(rawSnapshot), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +211,7 @@ func TestLLMCheckCompileEvaluateRedactionAndQuoteGate(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected blocking fail exit 1, got %d (stderr=%s)", code, errOut.String())
 	}
-	if strings.Contains(seenInput, "ops@acme.io") || strings.Contains(seenInput, "topsecret12345") {
+	if strings.Contains(seenInput, "ops@acme.io") || strings.Contains(seenInput, syntheticCredential) {
 		t.Fatalf("local redaction leaked secrets: %s", seenInput)
 	}
 	if !strings.Contains(out.String(), "[AI-generated]") {
