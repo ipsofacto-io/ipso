@@ -384,6 +384,14 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 	if err != nil {
 		return mcptools.HealthOutput{}, err
 	}
+	seenIDs := make(map[string]string, len(loaded))
+	for _, item := range loaded {
+		if prev, dup := seenIDs[item.Rec.ID]; dup {
+			problems = append(problems, fmt.Sprintf("%s: duplicate-id: %s", item.Shown, prev))
+			continue
+		}
+		seenIDs[item.Rec.ID] = item.Shown
+	}
 	if len(problems) > 0 {
 		return mcptools.HealthOutput{}, fmt.Errorf("invalid decision files: %s", compiler.EscapeControls(strings.Join(problems, "; ")))
 	}
@@ -516,10 +524,14 @@ func localValidityState(rec edr.Record, now time.Time) string {
 	case "needs-review", "proposed":
 		return "needs_review"
 	}
+	year, month, day := now.Date()
+	today := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+	if today.Before(rec.ValidFrom) {
+		return "needs_review"
+	}
 	if !rec.InForce(now) {
 		return "expired"
 	}
-	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
 	if !rec.ReviewBy.IsZero() && today.After(rec.ReviewBy) {
 		return "needs_review"
 	}
@@ -555,6 +567,18 @@ func localVerifiability(in mcptools.VerifiabilityInput) mcptools.VerifiabilityOu
 			AIGenerated:       false,
 		}
 	}
+	if humanAttestationPattern.MatchString(combined) {
+		return mcptools.VerifiabilityOutput{
+			Classification: "human_attestation_only",
+			Summary:        "Statement governs a human or organizational ceremony rather than an inspectable code or infrastructure artifact.",
+			Suggestions: []string{
+				"Record the decision with status: accepted and checks: [] if human attestation is intended, or rewrite around an inspectable repository artifact.",
+			},
+			CandidateChecks:   []mcptools.CandidateCheck{},
+			CandidatePremises: []mcptools.CandidatePremise{},
+			AIGenerated:       false,
+		}
+	}
 	checks := []mcptools.CandidateCheck{}
 	switch {
 	case strings.Contains(lower, "terraform") || strings.Contains(lower, "tofu") || strings.Contains(lower, "firewall") || strings.Contains(lower, "egress") || strings.Contains(lower, "s3") || strings.Contains(lower, "ebs"):
@@ -582,17 +606,6 @@ func localVerifiability(in mcptools.VerifiabilityInput) mcptools.VerifiabilityOu
 			MaxAgeDays: 7,
 			Rationale:  "Kubernetes manifests and live cluster exports can be verified with Kyverno policies.",
 		})
-	case humanAttestationPattern.MatchString(combined):
-		return mcptools.VerifiabilityOutput{
-			Classification: "human_attestation_only",
-			Summary:        "Statement governs a human or organizational ceremony rather than an inspectable code or infrastructure artifact.",
-			Suggestions: []string{
-				"Record the decision with status: accepted and checks: [] if human attestation is intended, or rewrite around an inspectable repository artifact.",
-			},
-			CandidateChecks:   []mcptools.CandidateCheck{},
-			CandidatePremises: []mcptools.CandidatePremise{},
-			AIGenerated:       false,
-		}
 	default:
 		checks = append(checks, mcptools.CandidateCheck{
 			Engine:     "llm",

@@ -455,12 +455,22 @@ func TestMCPHealthAndVerifiability(t *testing.T) {
 
 	attest, failure := callTool[mcptools.VerifiabilityOutput](t, session, mcptools.ToolVerifiability, mcptools.VerifiabilityInput{
 		Title:     "Hold blameless postmortems",
-		Statement: "Every Sev-1 incident MUST have a blameless postmortem reviewed in a team meeting within 5 business days.",
+		Statement: "Every Kubernetes Sev-1 incident MUST have a blameless postmortem reviewed in a team meeting within 5 business days.",
 	})
 	if failure != "" {
 		t.Fatalf("decisions.verifiability failed: %s", failure)
 	}
 	if attest.Classification != "human_attestation_only" || len(attest.CandidateChecks) != 0 {
 		t.Fatalf("expected human_attestation_only classification, got %+v", attest)
+	}
+
+	// Duplicate decision IDs must fail closed in decisions.health just like decisions.applicable.
+	rawTLS, err := os.ReadFile(filepath.Join(root, "docs/decisions/use-tls.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRuleFile(t, root, "docs/decisions/use-tls-dup.md", strings.Replace(string(rawTLS), "slug: use-tls", "slug: use-tls-dup", 1))
+	if _, dupFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"}); !strings.Contains(dupFailure, "duplicate-id") {
+		t.Fatalf("expected duplicate-id error from decisions.health, got %q", dupFailure)
 	}
 }
