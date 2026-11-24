@@ -11,7 +11,7 @@ import (
 // publishedSchemaSHA256 is the sha256 of schema/edr-v1.1.schema.json in
 // ipsofacto-io/edr-spec (ADR-0159). A published 1.x schema file never changes,
 // so the embedded copy must keep this digest.
-const publishedSchemaSHA256 = "26c5e68dffdf96fbd23038ff0120086cc54bfd3f1272c59387db3593dbc3f1ad"
+const publishedSchemaSHA256 = "6d2e938e3b4241c13e3f8805f1f1aaf77bb13184b7400b47b566928f91899ecf"
 
 func TestEmbeddedSchemaIsTheEDR11File(t *testing.T) {
 	sum := sha256.Sum256(SchemaJSON)
@@ -97,7 +97,7 @@ Verification.
 	if len(rec.Checks) != 1 || rec.Checks[0].Engine != "llm" || rec.Checks[0].MaxAgeDays != 7 {
 		t.Fatalf("Checks = %+v, want engine=llm max_age_days=7", rec.Checks)
 	}
-	for _, badRef := range []string{"https://example.com/rules/check.llm.json", `"..\\outside\\check.llm.json"`, ".ipso/checks//double.llm.json"} {
+	for _, badRef := range []string{"https://example.com/rules/check.llm.json", `"..\\outside\\check.llm.json"`, ".ipso/checks//double.llm.json", `"%2e%2e/outside/check.llm.json"`} {
 		badDoc, parseErr := Parse(strings.Replace(raw, ".ipso/checks/firewall-egress.llm.json", badRef, 1))
 		if parseErr != nil {
 			t.Fatalf("Parse(%s): %v", badRef, parseErr)

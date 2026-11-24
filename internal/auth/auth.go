@@ -271,6 +271,11 @@ func Login(ctx context.Context, opts LoginOptions) (TokenResponse, error) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		gotState := r.URL.Query().Get("state")
+		if len(gotState) != len(pkce.State) || subtle.ConstantTimeCompare([]byte(gotState), []byte(pkce.State)) != 1 {
+			http.Error(w, "state mismatch", http.StatusBadRequest)
+			return
+		}
 		cbMu.Lock()
 		if handled {
 			cbMu.Unlock()
@@ -280,11 +285,6 @@ func Login(ctx context.Context, opts LoginOptions) (TokenResponse, error) {
 		handled = true
 		cbMu.Unlock()
 
-		if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("state")), []byte(pkce.State)) != 1 {
-			http.Error(w, "state mismatch", http.StatusBadRequest)
-			resCh <- callbackResult{err: errors.New("OAuth state mismatch on loopback callback")}
-			return
-		}
 		if errParam := r.URL.Query().Get("error"); errParam != "" {
 			http.Error(w, "authentication failed", http.StatusBadRequest)
 			resCh <- callbackResult{err: fmt.Errorf("authentication refused: %s", errParam)}
@@ -376,7 +376,7 @@ func exchangeAndSaveCLIToken(ctx context.Context, client *http.Client, store Sto
 	return tok, nil
 }
 
-// Logout revokes the CLI session on the server when reachable and deletes the local credential.
+// Logout deletes the local credential and revokes the CLI session on the server, returning an error if either step fails.
 func Logout(ctx context.Context, store Store, client *http.Client, serverFlag string) error {
 	if store == nil {
 		store = DefaultStore()
@@ -388,15 +388,32 @@ func Logout(ctx context.Context, store Store, client *http.Client, serverFlag st
 	if client == nil {
 		client = &http.Client{Timeout: defaultHTTPTimeout}
 	}
+	var revokeErr error
 	req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, sess.ServerURL+"/auth/cli/logout", bytes.NewReader([]byte(`{}`)))
-	if reqErr == nil {
+	if reqErr != nil {
+		revokeErr = reqErr
+	} else {
 		req.Header.Set("Authorization", "Bearer "+sess.Token)
 		req.Header.Set("Content-Type", "application/json")
-		if resp, doErr := client.Do(req); doErr == nil {
+		resp, doErr := client.Do(req)
+		if doErr != nil {
+			revokeErr = doErr
+		} else {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 			_ = resp.Body.Close()
+			if resp.StatusCode >= 400 {
+				revokeErr = decodeAPIError(resp.StatusCode, raw)
+			}
 		}
 	}
-	return store.Delete(sess.ServerURL)
+	delErr := store.Delete(sess.ServerURL)
+	if delErr != nil {
+		return delErr
+	}
+	if revokeErr != nil {
+		return fmt.Errorf("local credential removed, but server session revocation failed: %w", revokeErr)
+	}
+	return nil
 }
 
 // Client performs authenticated JSON calls against ipso-server.

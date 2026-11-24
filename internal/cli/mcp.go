@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -448,6 +449,14 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 				})
 			}
 		}
+		validFrom := ""
+		if !item.Rec.ValidFrom.IsZero() {
+			validFrom = item.Rec.ValidFrom.Format("2006-01-02")
+		}
+		reviewBy := ""
+		if !item.Rec.ReviewBy.IsZero() {
+			reviewBy = item.Rec.ReviewBy.Format("2006-01-02")
+		}
 		out.Decisions = append(out.Decisions, mcptools.DecisionHealth{
 			ID:          item.Rec.ID,
 			Slug:        item.Rec.Slug,
@@ -457,9 +466,9 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 			Validity: mcptools.ValidityHealth{
 				State:              valState,
 				Status:             item.Rec.Status,
-				ValidFrom:          item.Rec.ValidFrom.Format("2006-01-02"),
+				ValidFrom:          validFrom,
 				ValidTo:            validTo,
-				ReviewBy:           item.Rec.ReviewBy.Format("2006-01-02"),
+				ReviewBy:           reviewBy,
 				OpenPremiseReasons: []mcptools.PremiseAlert{},
 			},
 			Compliance: mcptools.ComplianceHealth{
@@ -498,22 +507,23 @@ func (b *localBackend) Verifiability(_ context.Context, in mcptools.Verifiabilit
 	return localVerifiability(in), nil
 }
 
+var vagueQualifierPattern = regexp.MustCompile(`(?i)\b(where appropriate|when possible|try to|reasonable|best effort|prefer where sensible|as needed)\b`)
+
 func localVerifiability(in mcptools.VerifiabilityInput) mcptools.VerifiabilityOutput {
-	lower := strings.ToLower(in.Title + " " + in.Statement + " " + in.Context)
-	vagueTerms := []string{"where appropriate", "when possible", "try to", "reasonable", "best effort", "prefer where sensible", "as needed"}
-	for _, term := range vagueTerms {
-		if strings.Contains(lower, term) {
-			return mcptools.VerifiabilityOutput{
-				Classification: "ambiguous",
-				Summary:        fmt.Sprintf("Statement contains non-deterministic qualifier %q; replace with an explicit scope, resource attribute, or measurable invariant.", term),
-				Suggestions: []string{
-					"Replace discretionary qualifiers with explicit MUST / MUST NOT invariants and named scope exceptions.",
-					"Add a concrete check (OPA, Semgrep, Kyverno, or engine: llm with allow/deny fixtures) once the invariant is specific.",
-				},
-				CandidateChecks:   []mcptools.CandidateCheck{},
-				CandidatePremises: []mcptools.CandidatePremise{},
-				AIGenerated:       false,
-			}
+	combined := in.Title + " " + in.Statement + " " + in.Context
+	lower := strings.ToLower(combined)
+	if match := vagueQualifierPattern.FindString(combined); match != "" {
+		term := strings.ToLower(match)
+		return mcptools.VerifiabilityOutput{
+			Classification: "ambiguous",
+			Summary:        fmt.Sprintf("Statement contains non-deterministic qualifier %q; replace with an explicit scope, resource attribute, or measurable invariant.", term),
+			Suggestions: []string{
+				"Replace discretionary qualifiers with explicit MUST / MUST NOT invariants and named scope exceptions.",
+				"Add a concrete check (OPA, Semgrep, Kyverno, or engine: llm with allow/deny fixtures) once the invariant is specific.",
+			},
+			CandidateChecks:   []mcptools.CandidateCheck{},
+			CandidatePremises: []mcptools.CandidatePremise{},
+			AIGenerated:       false,
 		}
 	}
 	checks := []mcptools.CandidateCheck{}

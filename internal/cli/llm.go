@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -253,8 +256,6 @@ func llmCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 			return compiler.Outcome{Err: fmt.Errorf("redacted input (%d bytes) exceeds check max_input_bytes (%d)", len(redacted), spec.EffectiveMaxInputBytes())}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-
 		var ans llmcheck.Answer
 		var modelID, promptVer string
 		if opts.llmURL != "" {
@@ -262,6 +263,7 @@ func llmCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 		} else {
 			ans, modelID, promptVer, err = evaluateServerLLM(ctx, *serverClient, entry, spec, redacted, inputSHA)
 		}
+		cancel()
 		if err != nil {
 			return compiler.Outcome{Err: err}
 		}
@@ -349,27 +351,127 @@ func resolveBYOLLMEndpoint(normalized string) string {
 	}
 }
 
-func noRedirectHTTPClient(base *http.Client) *http.Client {
+var (
+	byollmBlockedV4 = []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("100.64.0.0/10"),
+		netip.MustParsePrefix("172.16.0.0/12"),
+		netip.MustParsePrefix("192.0.0.0/24"),
+		netip.MustParsePrefix("192.0.2.0/24"),
+		netip.MustParsePrefix("192.168.0.0/16"),
+		netip.MustParsePrefix("198.18.0.0/15"),
+		netip.MustParsePrefix("198.51.100.0/24"),
+		netip.MustParsePrefix("203.0.113.0/24"),
+		netip.MustParsePrefix("240.0.0.0/4"),
+	}
+	byollmGlobalV6  = netip.MustParsePrefix("2000::/3")
+	byollmBlockedV6 = []netip.Prefix{
+		netip.MustParsePrefix("2001::/23"),
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("2002::/16"),
+		netip.MustParsePrefix("3fff::/20"),
+	}
+)
+
+func isPublicUnicastAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return false
+	}
+	addr = addr.Unmap()
+	if !addr.IsGlobalUnicast() {
+		return false
+	}
+	if addr.Is4() {
+		for _, p := range byollmBlockedV4 {
+			if p.Contains(addr) {
+				return false
+			}
+		}
+		return true
+	}
+	if !byollmGlobalV6.Contains(addr) {
+		return false
+	}
+	for _, p := range byollmBlockedV6 {
+		if p.Contains(addr) {
+			return false
+		}
+	}
+	return true
+}
+
+func validateBYOLLMBaseURL(raw string) (string, bool, error) {
+	normalized, err := auth.NormalizeServerURL(raw)
+	if err != nil {
+		return "", false, err
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", false, err
+	}
+	host := strings.ToLower(parsed.Hostname())
+	allowLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
+	if !allowLoopback {
+		if addr, parseErr := netip.ParseAddr(host); parseErr == nil && !isPublicUnicastAddr(addr) {
+			return "", false, errors.New("BYOLLM endpoint must be a public unicast host or explicit loopback (localhost, 127.0.0.1, ::1)")
+		}
+	}
+	return normalized, allowLoopback, nil
+}
+
+func byollmHTTPClient(base *http.Client, allowLoopback bool) *http.Client {
 	refuse := func(*http.Request, []*http.Request) error {
 		return errors.New("BYOLLM redirects are refused")
 	}
-	if base == nil {
-		return &http.Client{Timeout: 60 * time.Second, CheckRedirect: refuse}
+	var clone http.Client
+	if base != nil {
+		clone = *base
 	}
-	clone := *base
 	if clone.Timeout == 0 {
 		clone.Timeout = 60 * time.Second
 	}
 	clone.CheckRedirect = refuse
+	if !allowLoopback && clone.Transport == nil {
+		if def, ok := http.DefaultTransport.(*http.Transport); ok {
+			tr := def.Clone()
+			dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
+			tr.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(address)
+				if err != nil {
+					return nil, err
+				}
+				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				if err != nil || len(ips) == 0 {
+					if err != nil {
+						return nil, err
+					}
+					return nil, fmt.Errorf("no IP addresses resolved for %s", host)
+				}
+				var firstValid netip.Addr
+				for _, ipAddr := range ips {
+					addr, ok := netip.AddrFromSlice(ipAddr.IP)
+					if !ok || !isPublicUnicastAddr(addr) {
+						return nil, fmt.Errorf("refusing private, loopback, or metadata IP target for BYOLLM host %s", host)
+					}
+					if !firstValid.IsValid() {
+						firstValid = addr.Unmap()
+					}
+				}
+				return dialer.DialContext(ctx, network, net.JoinHostPort(firstValid.String(), port))
+			}
+			clone.Transport = tr
+		}
+	}
 	return &clone
 }
 
 func evaluateBYOLLM(ctx context.Context, httpClient *http.Client, baseURL, modelID, slug string, spec llmcheck.Spec, redactedInput string) (llmcheck.Answer, string, string, error) {
-	normalized, err := auth.NormalizeServerURL(baseURL)
+	normalized, allowLoopback, err := validateBYOLLMBaseURL(baseURL)
 	if err != nil {
 		return llmcheck.Answer{}, "", "", err
 	}
-	httpClient = noRedirectHTTPClient(httpClient)
+	httpClient = byollmHTTPClient(httpClient, allowLoopback)
 	payload, err := json.Marshal(map[string]any{
 		"model":       modelID,
 		"temperature": 0,

@@ -345,4 +345,14 @@ func TestResolveBYOLLMEndpointAndRedirectRefusal(t *testing.T) {
 	if _, _, _, err := evaluateBYOLLM(t.Context(), redirectSrv.Client(), redirectSrv.URL+"/v1", "local-model", "fw", spec, `{}`); err == nil {
 		t.Fatal("expected BYOLLM redirect to be refused")
 	}
+	for _, blockedURL := range []string{
+		"https://169.254.169.254/v1",
+		"https://10.0.0.5/v1",
+		"https://192.168.1.10/v1",
+		"https://[fd00::1]/v1",
+	} {
+		if _, _, _, err := evaluateBYOLLM(t.Context(), nil, blockedURL, "m", "fw", spec, `{}`); err == nil {
+			t.Fatalf("expected private or metadata BYOLLM URL %s to be refused", blockedURL)
+		}
+	}
 }

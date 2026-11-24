@@ -411,3 +411,45 @@ func TestMCPUsage(t *testing.T) {
 		t.Fatalf("code %d: %s", code, stderr.String())
 	}
 }
+
+func TestMCPHealthAndVerifiability(t *testing.T) {
+	root := mcpFixture(t)
+	session := mcpClient(t, root)
+
+	health, failure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls"})
+	if failure != "" {
+		t.Fatalf("decisions.health failed: %s", failure)
+	}
+	if len(health.Decisions) != 1 {
+		t.Fatalf("got %d decisions, want 1", len(health.Decisions))
+	}
+	if health.Decisions[0].Validity.ValidTo != "" {
+		t.Fatalf("expected empty ValidTo for null valid_to, got %q", health.Decisions[0].Validity.ValidTo)
+	}
+	if health.Decisions[0].Validity.State != "valid" || health.Decisions[0].Compliance.State != "unverified" || health.Decisions[0].Compliance.Note == "" {
+		t.Fatalf("unexpected local health: %+v", health.Decisions[0])
+	}
+
+	// "unreasonable" must NOT false-positive on the single-word vague qualifier "reasonable".
+	verif, failure := callTool[mcptools.VerifiabilityOutput](t, session, mcptools.ToolVerifiability, mcptools.VerifiabilityInput{
+		Title:     "Reject unreasonable firewall rules",
+		Statement: "Production firewall Terraform plans MUST deny 0.0.0.0/0 egress.",
+	})
+	if failure != "" {
+		t.Fatalf("decisions.verifiability failed: %s", failure)
+	}
+	if verif.Classification != "verifiable" || len(verif.CandidateChecks) == 0 {
+		t.Fatalf("expected verifiable with candidate checks, got %+v", verif)
+	}
+
+	ambig, failure := callTool[mcptools.VerifiabilityOutput](t, session, mcptools.ToolVerifiability, mcptools.VerifiabilityInput{
+		Title:     "Use TLS",
+		Statement: "Services should use TLS where appropriate.",
+	})
+	if failure != "" {
+		t.Fatalf("decisions.verifiability failed: %s", failure)
+	}
+	if ambig.Classification != "ambiguous" {
+		t.Fatalf("expected ambiguous classification, got %+v", ambig)
+	}
+}
