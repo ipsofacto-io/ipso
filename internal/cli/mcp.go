@@ -405,35 +405,40 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 	if in.Ref != "" && q != "" {
 		return mcptools.HealthOutput{}, errors.New("ref and query cannot be combined")
 	}
+	var selectedRef *edr.Loaded
 	if in.Ref != "" {
-		matches := 0
+		var allMatches, inForceMatches []edr.Loaded
 		for _, item := range loaded {
 			if item.Rec.ID == in.Ref || item.Rec.Slug == in.Ref {
-				matches++
+				allMatches = append(allMatches, item)
+				if item.Rec.InForce(now) {
+					inForceMatches = append(inForceMatches, item)
+				}
 			}
 		}
-		if matches > 1 {
+		switch {
+		case len(inForceMatches) > 1 || (len(inForceMatches) == 0 && len(allMatches) > 1):
 			return mcptools.HealthOutput{}, fmt.Errorf("more than one decision with id or slug %q", compiler.EscapeControls(in.Ref))
+		case len(inForceMatches) == 1:
+			selectedRef = &inForceMatches[0]
+		case len(allMatches) == 1:
+			selectedRef = &allMatches[0]
 		}
 	}
 	if len(problems) > 0 {
 		return mcptools.HealthOutput{}, fmt.Errorf("invalid decision files: %s", compiler.EscapeControls(strings.Join(problems, "; ")))
 	}
-	if in.Ref != "" {
-		found := false
-		for _, item := range loaded {
-			if item.Rec.ID == in.Ref || item.Rec.Slug == in.Ref {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return mcptools.HealthOutput{}, fmt.Errorf("no decision with id or slug %q", compiler.EscapeControls(in.Ref))
-		}
+	if in.Ref != "" && selectedRef == nil {
+		return mcptools.HealthOutput{}, fmt.Errorf("no decision with id or slug %q", compiler.EscapeControls(in.Ref))
 	}
 	out := mcptools.HealthOutput{Decisions: []mcptools.DecisionHealth{}}
 	for _, item := range loaded {
-		if in.Ref != "" && item.Rec.ID != in.Ref && item.Rec.Slug != in.Ref {
+		if in.Ref != "" {
+			if item.Shown != selectedRef.Shown {
+				continue
+			}
+		} else if item.Rec.Status == "proposed" || item.Rec.Status == "rejected" {
+			// Unapproved drafts are omitted from unscoped and query listings; explicit ref lookup still inspects them.
 			continue
 		}
 		if in.Ref == "" && (in.Repo != "" || in.Env != "") && !item.Rec.Applies(in.Repo, nil, in.Env) {

@@ -11,6 +11,9 @@ import (
 var (
 	hedgeQualifierPattern   = regexp.MustCompile(`(?i)\b(should try|where appropriate|as needed|when possible|if reasonable|reasonable|try to|generally|prefer to|prefer where sensible|best effort|consider using|ideally)\b`)
 	humanAttestationPattern = regexp.MustCompile(`(?i)\b(postmortem|retrospective|architecture board|committee|manual sign-off|tabletop exercise|team meeting|on-call rotation)\b`)
+	infraKeywordPattern     = regexp.MustCompile(`(?i)(\b(firewall|egress|cidr|security group|terraform|opentofu|tofu|s3|ebs)\b|0\.0\.0\.0/0)`)
+	k8sKeywordPattern       = regexp.MustCompile(`(?i)\b(kubernetes|k8s|pod|pods|ingress|networkpolicy|namespace|namespaces)\b`)
+	premiseKeywordPattern   = regexp.MustCompile(`(?i)\b(cost|costs|latency|throughput|vendor|vendors)\b`)
 )
 
 // AnalyzeVerifiability classifies a draft decision deterministically so local MCP and server
@@ -65,7 +68,7 @@ func sharpenStatement(stmt, hedge string) string {
 func suggestChecksForText(lower, title, statement string) []CandidateCheck {
 	var out []CandidateCheck
 	switch {
-	case strings.Contains(lower, "firewall") || strings.Contains(lower, "egress") || strings.Contains(lower, "cidr") || strings.Contains(lower, "0.0.0.0/0") || strings.Contains(lower, "security group") || strings.Contains(lower, "terraform") || strings.Contains(lower, "tofu") || strings.Contains(lower, "s3") || strings.Contains(lower, "ebs"):
+	case infraKeywordPattern.MatchString(lower):
 		out = append(out, CandidateCheck{
 			Engine:     "opa",
 			Target:     "terraform-plan",
@@ -73,7 +76,7 @@ func suggestChecksForText(lower, title, statement string) []CandidateCheck {
 			MaxAgeDays: 7,
 			Rationale:  "Deterministic Rego check over OpenTofu/Terraform plan and refresh-only live state.",
 		})
-	case strings.Contains(lower, "kubernetes") || strings.Contains(lower, "pod") || strings.Contains(lower, "ingress") || strings.Contains(lower, "networkpolicy") || strings.Contains(lower, "namespace"):
+	case k8sKeywordPattern.MatchString(lower):
 		out = append(out, CandidateCheck{
 			Engine:     "kyverno",
 			Target:     "kubernetes-manifest",
@@ -110,7 +113,7 @@ func suggestChecksForText(lower, title, statement string) []CandidateCheck {
 }
 
 func suggestPremisesForText(lower string) []CandidatePremise {
-	if strings.Contains(lower, "cost") || strings.Contains(lower, "latency") || strings.Contains(lower, "throughput") || strings.Contains(lower, "vendor") {
+	if premiseKeywordPattern.MatchString(lower) {
 		return []CandidatePremise{{
 			ID:        "baseline-assumption",
 			Statement: "Re-verify the operational or vendor assumption behind this decision periodically.",

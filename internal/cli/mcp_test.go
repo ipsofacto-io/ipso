@@ -488,15 +488,20 @@ func TestMCPHealthAndVerifiability(t *testing.T) {
 	}
 	_ = os.Remove(filepath.Join(root, "docs/decisions/use-tls-second.md"))
 
-	// A non-in-force proposed record sharing an ID must not break decisions.health (matching decisions.applicable).
+	// A non-in-force proposed record sharing an ID or slug must not break decisions.health or appear in query listings.
 	rawTLS, err := os.ReadFile(filepath.Join(root, "docs/decisions/use-tls.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposedDup := strings.Replace(strings.Replace(string(rawTLS), "slug: use-tls", "slug: use-tls-proposed", 1), "status: accepted", "status: proposed", 1)
+	proposedDup := strings.Replace(string(rawTLS), "status: accepted", "status: proposed", 1)
 	writeRuleFile(t, root, "docs/decisions/use-tls-proposed.md", proposedDup)
-	if _, propFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"}); propFailure != "" {
-		t.Fatalf("proposed record sharing id should not fail decisions.health, got %q", propFailure)
+	qOut, propFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"})
+	if propFailure != "" || len(qOut.Decisions) != 1 || qOut.Decisions[0].Validity.Status != "accepted" {
+		t.Fatalf("proposed draft should be omitted from query listing without failing, got failure=%q out=%+v", propFailure, qOut)
+	}
+	refOut, propRefFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls"})
+	if propRefFailure != "" || len(refOut.Decisions) != 1 || refOut.Decisions[0].Validity.Status != "accepted" {
+		t.Fatalf("proposed draft sharing slug should resolve to single in-force record on ref lookup, got failure=%q out=%+v", propRefFailure, refOut)
 	}
 	_ = os.Remove(filepath.Join(root, "docs/decisions/use-tls-proposed.md"))
 
