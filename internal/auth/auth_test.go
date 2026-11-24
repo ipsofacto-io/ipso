@@ -233,3 +233,29 @@ func TestLogoutRetainsCredentialOnServerFailureAndDeletesOnceRevoked(t *testing.
 		t.Fatal("expected local credential to be deleted once server reports 401")
 	}
 }
+
+func TestClientRefusesRedirects(t *testing.T) {
+	leaked := false
+	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer evil.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, evil.URL+"/steal", http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+
+	c := Client{
+		Session:    Session{ServerURL: origin.URL, Token: "ipsocli_abcdefghijklmnopqrstuvwxyz123456"},
+		HTTPClient: origin.Client(),
+	}
+	var out map[string]any
+	if err := c.PostJSON(context.Background(), "/v1/verifiability", map[string]string{"title": "t"}, &out); err == nil {
+		t.Fatal("expected redirect on ipso-server API call to be refused")
+	}
+	if leaked {
+		t.Fatal("redirect target must never receive request")
+	}
+}

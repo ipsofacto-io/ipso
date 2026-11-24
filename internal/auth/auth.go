@@ -253,10 +253,7 @@ func Login(ctx context.Context, opts LoginOptions) (TokenResponse, error) {
 	q.Set("state", pkce.State)
 	authURL := serverURL + "/auth/cli/start?" + q.Encode()
 
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: defaultHTTPTimeout}
-	}
+	client := withoutRedirects(opts.HTTPClient)
 
 	type callbackResult struct {
 		tok TokenResponse
@@ -388,9 +385,7 @@ func Logout(ctx context.Context, store Store, client *http.Client, serverFlag st
 	if err != nil {
 		return err
 	}
-	if client == nil {
-		client = &http.Client{Timeout: defaultHTTPTimeout}
-	}
+	client = withoutRedirects(client)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sess.ServerURL+"/auth/cli/logout", bytes.NewReader([]byte(`{}`)))
 	if err != nil {
 		return err
@@ -415,11 +410,26 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-func (c Client) httpClient() *http.Client {
-	if c.HTTPClient != nil {
-		return c.HTTPClient
+func withoutRedirects(base *http.Client) *http.Client {
+	refuse := func(*http.Request, []*http.Request) error {
+		return errors.New("refusing HTTP redirect on ipso-server call")
 	}
-	return &http.Client{Timeout: defaultHTTPTimeout}
+	if base == nil {
+		return &http.Client{
+			Timeout:       defaultHTTPTimeout,
+			CheckRedirect: refuse,
+		}
+	}
+	cp := *base
+	cp.CheckRedirect = refuse
+	if cp.Timeout == 0 {
+		cp.Timeout = defaultHTTPTimeout
+	}
+	return &cp
+}
+
+func (c Client) httpClient() *http.Client {
+	return withoutRedirects(c.HTTPClient)
 }
 
 // GetJSON sends an authenticated GET request to pathAndQuery and decodes JSON into out.
