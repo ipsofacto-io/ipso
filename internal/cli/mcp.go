@@ -437,9 +437,15 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 			if item.Shown != selectedRef.Shown {
 				continue
 			}
-		} else if item.Rec.Status == "proposed" || item.Rec.Status == "rejected" {
-			// Unapproved drafts are omitted from unscoped and query listings; explicit ref lookup still inspects them.
-			continue
+		} else {
+			if item.Rec.Status == "proposed" || item.Rec.Status == "rejected" {
+				// Unapproved drafts are omitted from unscoped and query listings; explicit ref lookup still inspects them.
+				continue
+			}
+			if !item.Rec.InForce(now) && seenIDs[item.Rec.ID] != "" {
+				// Shadowed historical copies of an active decision ID do not emit a duplicate row.
+				continue
+			}
 		}
 		if in.Ref == "" && (in.Repo != "" || in.Env != "") && !item.Rec.Applies(in.Repo, nil, in.Env) {
 			continue
@@ -567,16 +573,21 @@ func frontSupersedes(raw any, slug, id string) bool {
 }
 
 func localValidityState(rec edr.Record, now time.Time) string {
+	year, month, day := now.Date()
+	today := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	switch rec.Status {
 	case "superseded":
 		return "superseded"
 	case "deprecated", "rejected":
 		return "deprecated"
-	case "needs-review", "proposed":
+	case "proposed":
+		return "needs_review"
+	case "needs-review":
+		if rec.ValidTo != nil && !today.Before(*rec.ValidTo) {
+			return "expired"
+		}
 		return "needs_review"
 	}
-	year, month, day := now.Date()
-	today := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	if today.Before(rec.ValidFrom) {
 		return "needs_review"
 	}
