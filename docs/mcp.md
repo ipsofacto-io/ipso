@@ -39,7 +39,7 @@ The server has run in Claude Code, Cursor, and Codex.
 | `checks.evaluate` | `diff` or `plan`, `env` | verdict lines, `blocked`, SARIF, `not_evaluated` | none |
 | `decisions.propose` | `title`, `statement`, `rationale`, `verification`, `paths`, `env`, `session_ref` | proposal id and path | writes one new file |
 
-A field left out of `decisions.applicable` widens the answer, so pass the paths and environment the work touches. `intent` does not change the answer. An invalid decision file or duplicate decision id makes `decisions.applicable` and `decisions.health` fail, because a partial or ambiguous list would mislead callers. Locally, `decisions.health` sets `compliance.state` to `unverified` (unless an active checkout waiver covers the decision) and populates `compliance.note`, because stored CI and live drift verdicts live in the control plane (`ipso status` or remote MCP). `decisions.get` refuses `as_of_tx`, because only a registry knows what was recorded when.
+A field left out of `decisions.applicable` widens the answer, so pass the paths and environment the work touches. `intent` does not change the answer. An invalid decision file or two in-force records sharing one id makes `decisions.applicable` and `decisions.health` fail, because a partial or ambiguous list would mislead callers. Locally, `decisions.health` sets `compliance.state` to `unverified` (unless an active checkout waiver covers the decision) and populates `compliance.note`, because stored CI and live drift verdicts live in the control plane (`ipso status` or remote MCP). `decisions.get` refuses `as_of_tx`, because only a registry knows what was recorded when.
 
 A record tagged `sensitive` comes back with no title, text, or sources.
 

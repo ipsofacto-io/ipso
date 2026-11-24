@@ -477,19 +477,30 @@ func TestMCPHealthAndVerifiability(t *testing.T) {
 		t.Fatalf("expected human_attestation_only classification, got %+v", attest)
 	}
 
-	// Duplicate slugs with distinct IDs must fail closed when queried by ref, matching decisions.get.
+	// Duplicate slugs with distinct IDs must fail closed on both ref and query paths.
 	dupSlug := strings.Replace(ruleRecord("use-tls-other-id", "Duplicate TLS slug", ruleRepoWide, "", "Second TLS record."), "slug: use-tls-other-id", "slug: use-tls", 1)
 	writeRuleFile(t, root, "docs/decisions/use-tls-second.md", dupSlug)
 	if _, slugFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls"}); !strings.Contains(slugFailure, "more than one decision") {
 		t.Fatalf("expected more than one decision error from decisions.health, got %q", slugFailure)
 	}
+	if _, slugQueryFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"}); !strings.Contains(slugQueryFailure, "duplicate-slug") {
+		t.Fatalf("expected duplicate-slug error from decisions.health query, got %q", slugQueryFailure)
+	}
 	_ = os.Remove(filepath.Join(root, "docs/decisions/use-tls-second.md"))
 
-	// Duplicate decision IDs must fail closed in decisions.health just like decisions.applicable.
+	// A non-in-force proposed record sharing an ID must not break decisions.health (matching decisions.applicable).
 	rawTLS, err := os.ReadFile(filepath.Join(root, "docs/decisions/use-tls.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	proposedDup := strings.Replace(strings.Replace(string(rawTLS), "slug: use-tls", "slug: use-tls-proposed", 1), "status: accepted", "status: proposed", 1)
+	writeRuleFile(t, root, "docs/decisions/use-tls-proposed.md", proposedDup)
+	if _, propFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"}); propFailure != "" {
+		t.Fatalf("proposed record sharing id should not fail decisions.health, got %q", propFailure)
+	}
+	_ = os.Remove(filepath.Join(root, "docs/decisions/use-tls-proposed.md"))
+
+	// Duplicate in-force decision IDs must fail closed in decisions.health just like decisions.applicable.
 	writeRuleFile(t, root, "docs/decisions/use-tls-dup.md", strings.Replace(string(rawTLS), "slug: use-tls", "slug: use-tls-dup", 1))
 	if _, dupFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"}); !strings.Contains(dupFailure, "duplicate-id") {
 		t.Fatalf("expected duplicate-id error from decisions.health, got %q", dupFailure)

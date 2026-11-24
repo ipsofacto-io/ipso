@@ -383,16 +383,23 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 	if err != nil {
 		return mcptools.HealthOutput{}, err
 	}
+	now := b.d.now()
 	seenIDs := make(map[string]string, len(loaded))
+	seenSlugs := make(map[string]string, len(loaded))
 	for _, item := range loaded {
+		if !item.Rec.InForce(now) {
+			continue
+		}
 		if prev, dup := seenIDs[item.Rec.ID]; dup {
 			problems = append(problems, fmt.Sprintf("%s: duplicate-id: %s", item.Shown, prev))
 			continue
 		}
 		seenIDs[item.Rec.ID] = item.Shown
-	}
-	if len(problems) > 0 {
-		return mcptools.HealthOutput{}, fmt.Errorf("invalid decision files: %s", compiler.EscapeControls(strings.Join(problems, "; ")))
+		if prev, dup := seenSlugs[item.Rec.Slug]; dup {
+			problems = append(problems, fmt.Sprintf("%s: duplicate-slug: %s", item.Shown, prev))
+			continue
+		}
+		seenSlugs[item.Rec.Slug] = item.Shown
 	}
 	q := strings.ToLower(strings.TrimSpace(in.Query))
 	if in.Ref != "" && q != "" {
@@ -405,14 +412,25 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 				matches++
 			}
 		}
-		if matches == 0 {
-			return mcptools.HealthOutput{}, fmt.Errorf("no decision with id or slug %q", compiler.EscapeControls(in.Ref))
-		}
 		if matches > 1 {
 			return mcptools.HealthOutput{}, fmt.Errorf("more than one decision with id or slug %q", compiler.EscapeControls(in.Ref))
 		}
 	}
-	now := b.d.now()
+	if len(problems) > 0 {
+		return mcptools.HealthOutput{}, fmt.Errorf("invalid decision files: %s", compiler.EscapeControls(strings.Join(problems, "; ")))
+	}
+	if in.Ref != "" {
+		found := false
+		for _, item := range loaded {
+			if item.Rec.ID == in.Ref || item.Rec.Slug == in.Ref {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return mcptools.HealthOutput{}, fmt.Errorf("no decision with id or slug %q", compiler.EscapeControls(in.Ref))
+		}
+	}
 	out := mcptools.HealthOutput{Decisions: []mcptools.DecisionHealth{}}
 	for _, item := range loaded {
 		if in.Ref != "" && item.Rec.ID != in.Ref && item.Rec.Slug != in.Ref {
@@ -552,16 +570,15 @@ func localValidityState(rec edr.Record, now time.Time) string {
 	case "needs-review", "proposed":
 		return "needs_review"
 	}
-	nowUTC := now.UTC()
-	year, month, day := nowUTC.Date()
+	year, month, day := now.Date()
 	today := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	if today.Before(rec.ValidFrom) {
 		return "needs_review"
 	}
-	if !rec.InForce(nowUTC) {
+	if !rec.InForce(now) {
 		return "expired"
 	}
-	if !rec.ReviewBy.IsZero() && nowUTC.After(rec.ReviewBy.UTC().Add(24*time.Hour)) {
+	if !rec.ReviewBy.IsZero() && today.After(rec.ReviewBy) {
 		return "needs_review"
 	}
 	return "valid"

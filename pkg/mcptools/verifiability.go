@@ -90,20 +90,22 @@ func suggestChecksForText(lower, title, statement string) []CandidateCheck {
 			Rationale:  "Static analysis check over repository changes.",
 		})
 	}
-	specBytes, _ := llmcheck.MarshalCanonical(llmcheck.Spec{
+	specBytes, err := llmcheck.MarshalCanonical(llmcheck.Spec{
 		Version:  llmcheck.SpecVersion,
 		Target:   llmcheck.TargetDiff,
 		Rubric:   strings.TrimSpace(title + ": " + statement),
 		Fixtures: []llmcheck.Fixture{},
 	})
-	out = append(out, CandidateCheck{
-		Engine:     "llm",
-		Target:     "diff",
-		Mode:       "warn",
-		MaxAgeDays: 14,
-		LLMSpec:    string(specBytes),
-		Rationale:  "Grounded LLM check for semantic invariants across diffs; requires approved allow/deny fixtures before mode: block.",
-	})
+	if err == nil {
+		out = append(out, CandidateCheck{
+			Engine:     "llm",
+			Target:     "diff",
+			Mode:       "warn",
+			MaxAgeDays: 14,
+			LLMSpec:    string(specBytes),
+			Rationale:  "Grounded LLM check for semantic invariants across diffs; requires approved allow/deny fixtures before mode: block.",
+		})
+	}
 	return out
 }
 

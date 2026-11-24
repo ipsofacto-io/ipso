@@ -256,3 +256,22 @@ func TestServeStdioAnswersEachLine(t *testing.T) {
 		t.Fatalf("%q", out.String())
 	}
 }
+
+func TestAnalyzeVerifiabilityEmitsValidLLMSpec(t *testing.T) {
+	res := AnalyzeVerifiability(VerifiabilityInput{
+		Title:     "Reject unreasonable firewall egress",
+		Statement: "Production Terraform plans MUST deny 0.0.0.0/0 egress.",
+	})
+	if res.Classification != "verifiable" {
+		t.Fatalf("got %q, want verifiable", res.Classification)
+	}
+	var foundLLM bool
+	for _, ch := range res.CandidateChecks {
+		if ch.Engine == "llm" && ch.LLMSpec != "" {
+			foundLLM = true
+		}
+	}
+	if !foundLLM {
+		t.Fatalf("expected non-empty llm candidate spec, got %+v", res.CandidateChecks)
+	}
+}
