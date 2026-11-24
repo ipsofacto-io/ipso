@@ -155,12 +155,12 @@ func (b *localBackend) evaluatePlan(in mcptools.EvaluateInput, build compiler.Bu
 		return mcptools.EvaluateOutput{}, err
 	}
 	sarifFile := filepath.Join(dir, "results.sarif")
-	args := []string{"check", "plan", planFile, "--sarif", sarifFile}
+	args := []string{planFile, "--sarif", sarifFile}
 	if in.Env != "" {
 		args = append(args, "--env", in.Env)
 	}
 	var stdout, stderr bytes.Buffer
-	code := run(args, &stdout, &stderr, b.d)
+	code := planCmd(b.root, args, &stdout, &stderr, b.d)
 	if code == 2 || stderr.Len() > 0 {
 		return mcptools.EvaluateOutput{}, errors.New(compiler.EscapeControls(strings.TrimSpace(stderr.String())))
 	}
@@ -415,6 +415,17 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 			}
 		}
 		valState := localValidityState(item.Rec, now)
+		supersededBy := ""
+		for _, other := range loaded {
+			if other.Rec.ID == item.Rec.ID || !other.Rec.InForce(now) {
+				continue
+			}
+			if frontSupersedes(other.Doc.Front["supersedes"], item.Rec.Slug, item.Rec.ID) {
+				supersededBy = other.Rec.Slug
+				valState = "superseded"
+				break
+			}
+		}
 		validTo := ""
 		if item.Rec.ValidTo != nil {
 			validTo = item.Rec.ValidTo.Format("2006-01-02")
@@ -427,7 +438,7 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 				break
 			}
 		}
-		if waived && len(item.Rec.Checks) > 0 {
+		if waived {
 			compState = "waived"
 		}
 		scopes := []mcptools.ScopeCompliance{}
@@ -469,16 +480,31 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 				ValidFrom:          validFrom,
 				ValidTo:            validTo,
 				ReviewBy:           reviewBy,
+				SupersededBy:       supersededBy,
 				OpenPremiseReasons: []mcptools.PremiseAlert{},
 			},
 			Compliance: mcptools.ComplianceHealth{
 				State:  compState,
-				Note:   "local checkout only; stored CI and live drift verdicts require ipso status or remote MCP",
+				Note:   "local checkout only; stored CI/live verdicts, registry supersession, and premise sweep require ipso status or remote MCP",
 				Scopes: scopes,
 			},
 		})
 	}
 	return out, nil
+}
+
+func frontSupersedes(raw any, slug, id string) bool {
+	items, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	for _, entry := range items {
+		s, ok := entry.(string)
+		if ok && (s == slug || s == id) {
+			return true
+		}
+	}
+	return false
 }
 
 func localValidityState(rec edr.Record, now time.Time) string {

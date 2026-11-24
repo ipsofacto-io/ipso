@@ -311,13 +311,18 @@ func llmCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 }
 
 func evaluateServerLLM(ctx context.Context, client auth.Client, entry compiler.Entry, spec llmcheck.Spec, redactedInput, inputSHA string) (llmcheck.Answer, string, string, error) {
+	redactedFixtures := make([]llmcheck.Fixture, len(spec.Fixtures))
+	for i, fx := range spec.Fixtures {
+		fx.Input = llmcheck.Redact(fx.Input)
+		redactedFixtures[i] = fx
+	}
 	var resp serverLLMEvalResponse
 	err := client.PostJSON(ctx, "/v1/llm/evaluate", serverLLMEvalRequest{
 		DecisionID:    entry.DecisionID,
 		Slug:          entry.Slug,
 		Target:        spec.Target,
 		Rubric:        spec.Rubric,
-		Fixtures:      spec.Fixtures,
+		Fixtures:      redactedFixtures,
 		RedactedInput: redactedInput,
 		InputSHA256:   inputSHA,
 	}, &resp)
@@ -420,7 +425,7 @@ func validateBYOLLMBaseURL(raw string) (string, bool, error) {
 	return normalized, allowLoopback, nil
 }
 
-func byollmHTTPClient(base *http.Client, allowLoopback bool) *http.Client {
+func byollmHTTPClient(base *http.Client, allowLoopback bool) (*http.Client, error) {
 	refuse := func(*http.Request, []*http.Request) error {
 		return errors.New("BYOLLM redirects are refused")
 	}
@@ -436,65 +441,45 @@ func byollmHTTPClient(base *http.Client, allowLoopback bool) *http.Client {
 		var baseTr *http.Transport
 		switch tr := clone.Transport.(type) {
 		case nil:
-			baseTr, _ = http.DefaultTransport.(*http.Transport)
+			var ok bool
+			baseTr, ok = http.DefaultTransport.(*http.Transport)
+			if !ok {
+				return nil, errors.New("BYOLLM requires *http.Transport on non-loopback hosts so resolved IPs can be pinned")
+			}
 		case *http.Transport:
 			baseTr = tr
+		default:
+			return nil, errors.New("BYOLLM custom RoundTripper is unsupported on non-loopback hosts; use *http.Transport so resolved IPs can be pinned")
 		}
-		if baseTr != nil {
-			tr := baseTr.Clone()
-			dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
-			tr.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-				host, port, err := net.SplitHostPort(address)
+		tr := baseTr.Clone()
+		dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
+		tr.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil || len(ips) == 0 {
 				if err != nil {
 					return nil, err
 				}
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-				if err != nil || len(ips) == 0 {
-					if err != nil {
-						return nil, err
-					}
-					return nil, fmt.Errorf("no IP addresses resolved for %s", host)
-				}
-				var firstValid netip.Addr
-				for _, ipAddr := range ips {
-					addr, ok := netip.AddrFromSlice(ipAddr.IP)
-					if !ok || !isPublicUnicastAddr(addr) {
-						return nil, fmt.Errorf("refusing private, loopback, or metadata IP target for BYOLLM host %s", host)
-					}
-					if !firstValid.IsValid() {
-						firstValid = addr.Unmap()
-					}
-				}
-				return dialer.DialContext(ctx, network, net.JoinHostPort(firstValid.String(), port))
+				return nil, fmt.Errorf("no IP addresses resolved for %s", host)
 			}
-			clone.Transport = tr
-		} else {
-			orig := clone.Transport
-			clone.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-				ips, err := net.DefaultResolver.LookupIPAddr(req.Context(), req.URL.Hostname())
-				if err != nil || len(ips) == 0 {
-					if err != nil {
-						return nil, err
-					}
-					return nil, fmt.Errorf("no IP addresses resolved for %s", req.URL.Hostname())
+			var firstValid netip.Addr
+			for _, ipAddr := range ips {
+				addr, ok := netip.AddrFromSlice(ipAddr.IP)
+				if !ok || !isPublicUnicastAddr(addr) {
+					return nil, fmt.Errorf("refusing private, loopback, or metadata IP target for BYOLLM host %s", host)
 				}
-				for _, ipAddr := range ips {
-					addr, ok := netip.AddrFromSlice(ipAddr.IP)
-					if !ok || !isPublicUnicastAddr(addr) {
-						return nil, fmt.Errorf("refusing private, loopback, or metadata IP target for BYOLLM host %s", req.URL.Hostname())
-					}
+				if !firstValid.IsValid() {
+					firstValid = addr.Unmap()
 				}
-				return orig.RoundTrip(req)
-			})
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(firstValid.String(), port))
 		}
+		clone.Transport = tr
 	}
-	return &clone
-}
-
-type roundTripperFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
+	return &clone, nil
 }
 
 func evaluateBYOLLM(ctx context.Context, httpClient *http.Client, baseURL, modelID, slug string, spec llmcheck.Spec, redactedInput string) (llmcheck.Answer, string, string, error) {
@@ -502,7 +487,10 @@ func evaluateBYOLLM(ctx context.Context, httpClient *http.Client, baseURL, model
 	if err != nil {
 		return llmcheck.Answer{}, "", "", err
 	}
-	httpClient = byollmHTTPClient(httpClient, allowLoopback)
+	httpClient, err = byollmHTTPClient(httpClient, allowLoopback)
+	if err != nil {
+		return llmcheck.Answer{}, "", "", err
+	}
 	payload, err := json.Marshal(map[string]any{
 		"model":       modelID,
 		"temperature": 0,
