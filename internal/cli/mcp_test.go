@@ -464,6 +464,14 @@ func TestMCPHealthAndVerifiability(t *testing.T) {
 		t.Fatalf("expected human_attestation_only classification, got %+v", attest)
 	}
 
+	// Duplicate slugs with distinct IDs must fail closed when queried by ref, matching decisions.get.
+	dupSlug := strings.Replace(ruleRecord("use-tls-other-id", "Duplicate TLS slug", ruleRepoWide, "", "Second TLS record."), "slug: use-tls-other-id", "slug: use-tls", 1)
+	writeRuleFile(t, root, "docs/decisions/use-tls-second.md", dupSlug)
+	if _, slugFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls"}); !strings.Contains(slugFailure, "more than one decision") {
+		t.Fatalf("expected more than one decision error from decisions.health, got %q", slugFailure)
+	}
+	_ = os.Remove(filepath.Join(root, "docs/decisions/use-tls-second.md"))
+
 	// Duplicate decision IDs must fail closed in decisions.health just like decisions.applicable.
 	rawTLS, err := os.ReadFile(filepath.Join(root, "docs/decisions/use-tls.md"))
 	if err != nil {

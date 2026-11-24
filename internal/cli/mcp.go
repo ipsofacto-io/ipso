@@ -395,6 +395,17 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 	if len(problems) > 0 {
 		return mcptools.HealthOutput{}, fmt.Errorf("invalid decision files: %s", compiler.EscapeControls(strings.Join(problems, "; ")))
 	}
+	if in.Ref != "" {
+		matches := 0
+		for _, item := range loaded {
+			if item.Rec.ID == in.Ref || item.Rec.Slug == in.Ref {
+				matches++
+			}
+		}
+		if matches > 1 {
+			return mcptools.HealthOutput{}, fmt.Errorf("more than one decision with id or slug %q", compiler.EscapeControls(in.Ref))
+		}
+	}
 	now := b.d.now()
 	q := strings.ToLower(strings.TrimSpace(in.Query))
 	out := mcptools.HealthOutput{Decisions: []mcptools.DecisionHealth{}}
@@ -424,6 +435,7 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 		}
 		valState := localValidityState(item.Rec, now)
 		supersededBy := ""
+		// Only in-force records supersede locally; unapproved proposed drafts do not mark an active decision superseded.
 		for _, other := range loaded {
 			if other.Rec.ID == item.Rec.ID || !other.Rec.InForce(now) {
 				continue
