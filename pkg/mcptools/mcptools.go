@@ -155,6 +155,7 @@ type ScopeCompliance struct {
 // ComplianceHealth aggregates per-scope compliance and freshness for one decision (ADR-0163).
 type ComplianceHealth struct {
 	State  string            `json:"state"`
+	Note   string            `json:"note,omitempty"`
 	Scopes []ScopeCompliance `json:"scopes"`
 }
 

@@ -54,6 +54,7 @@ type Item struct {
 	VersionInForce  int     `json:"version_in_force"`
 	Engine          string  `json:"engine,omitempty"`
 	Target          string  `json:"target,omitempty"`
+	Mode            string  `json:"mode,omitempty"`
 	MaxAgeDays      int     `json:"max_age_days,omitempty"`
 	Rego            *string `json:"rego"`
 	RegoSHA256      *string `json:"rego_sha256"`
@@ -118,6 +119,8 @@ func (i Item) validate() error {
 		return errors.New("a version is not a positive number")
 	case i.MaxAgeDays < 0 || i.MaxAgeDays > 365:
 		return errors.New("max_age_days is out of 1..365")
+	case i.Mode != "" && i.Mode != "block" && i.Mode != "warn" && i.Mode != "advise":
+		return fmt.Errorf("unsupported mode %q", i.Mode)
 	}
 	eng := i.effectiveEngine()
 	if eng != "opa" && eng != "llm" {
@@ -290,7 +293,11 @@ func plan(repo *os.Root, root string, result *Result, item Item, file edr.Loaded
 		if hex.EncodeToString(sum[:]) != *item.LLMSpecSHA256 {
 			return writes{}, "", fmt.Sprintf("check %s: the digest does not match the llm_spec", item.ID)
 		}
-		requireBlock := file.Rec.Criticality == "blocking"
+		effMode, modeErr := (edr.Check{Mode: item.Mode}).EffectiveMode(file.Rec.Criticality)
+		if modeErr != nil {
+			return writes{}, "", fmt.Sprintf("check %s: %s", item.ID, modeErr)
+		}
+		requireBlock := effMode == "block"
 		spec, err := llmcheck.ParseAndValidate(raw, item.Target, requireBlock)
 		if err != nil {
 			return writes{}, "", fmt.Sprintf("check %s: %s", item.ID, err)
@@ -300,6 +307,7 @@ func plan(repo *os.Root, root string, result *Result, item Item, file edr.Loaded
 			Engine:     "llm",
 			Target:     spec.Target,
 			Ref:        result.Rego,
+			Mode:       item.Mode,
 			MaxAgeDays: item.MaxAgeDays,
 		}
 	} else {

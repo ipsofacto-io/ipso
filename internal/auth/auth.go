@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -128,13 +129,43 @@ func isLoopbackHost(host string) bool {
 }
 
 // Resolve resolves the active Session from explicit serverFlag, IPSO_SERVER_URL / IPSO_TOKEN, or store.
+// When IPSO_TOKEN is set, the target server must match IPSO_SERVER_URL (or the saved login server when
+// IPSO_SERVER_URL is unset) so an untrusted or mistyped --server never receives the bearer token.
 func Resolve(store Store, serverFlag string) (Session, error) {
 	if store == nil {
 		store = DefaultStore()
 	}
-	rawServer := strings.TrimSpace(serverFlag)
+	flagRaw := strings.TrimSpace(serverFlag)
+	envRaw := strings.TrimSpace(os.Getenv(EnvServerURL))
+	if envTok := strings.TrimSpace(os.Getenv(EnvToken)); envTok != "" {
+		boundRaw := envRaw
+		if boundRaw == "" {
+			if saved, err := store.DefaultServer(); err == nil {
+				boundRaw = strings.TrimSpace(saved)
+			}
+		}
+		if boundRaw == "" {
+			return Session{}, errors.New("IPSO_TOKEN requires IPSO_SERVER_URL or a saved `ipso login` default server")
+		}
+		boundURL, err := NormalizeServerURL(boundRaw)
+		if err != nil {
+			return Session{}, err
+		}
+		if flagRaw != "" {
+			flagURL, err := NormalizeServerURL(flagRaw)
+			if err != nil {
+				return Session{}, err
+			}
+			if flagURL != boundURL {
+				return Session{}, fmt.Errorf("refusing to send IPSO_TOKEN to %s (bound to %s)", flagURL, boundURL)
+			}
+		}
+		return Session{ServerURL: boundURL, Token: envTok}, nil
+	}
+
+	rawServer := flagRaw
 	if rawServer == "" {
-		rawServer = strings.TrimSpace(os.Getenv(EnvServerURL))
+		rawServer = envRaw
 	}
 	if rawServer == "" {
 		var err error
@@ -146,9 +177,6 @@ func Resolve(store Store, serverFlag string) (Session, error) {
 	serverURL, err := NormalizeServerURL(rawServer)
 	if err != nil {
 		return Session{}, err
-	}
-	if envTok := strings.TrimSpace(os.Getenv(EnvToken)); envTok != "" {
-		return Session{ServerURL: serverURL, Token: envTok}, nil
 	}
 	tok, err := store.Load(serverURL)
 	if err != nil || strings.TrimSpace(tok) == "" {
@@ -225,48 +253,59 @@ func Login(ctx context.Context, opts LoginOptions) (TokenResponse, error) {
 	q.Set("state", pkce.State)
 	authURL := serverURL + "/auth/cli/start?" + q.Encode()
 
+	client := opts.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: defaultHTTPTimeout}
+	}
+
 	type callbackResult struct {
-		code string
-		err  error
+		tok TokenResponse
+		err error
 	}
 	resCh := make(chan callbackResult, 1)
+	var cbMu sync.Mutex
+	handled := false
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		cbMu.Lock()
+		if handled {
+			cbMu.Unlock()
+			http.Error(w, "callback already processed", http.StatusConflict)
+			return
+		}
+		handled = true
+		cbMu.Unlock()
+
 		if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("state")), []byte(pkce.State)) != 1 {
 			http.Error(w, "state mismatch", http.StatusBadRequest)
-			select {
-			case resCh <- callbackResult{err: errors.New("OAuth state mismatch on loopback callback")}:
-			default:
-			}
+			resCh <- callbackResult{err: errors.New("OAuth state mismatch on loopback callback")}
 			return
 		}
 		if errParam := r.URL.Query().Get("error"); errParam != "" {
 			http.Error(w, "authentication failed", http.StatusBadRequest)
-			select {
-			case resCh <- callbackResult{err: fmt.Errorf("authentication refused: %s", errParam)}:
-			default:
-			}
+			resCh <- callbackResult{err: fmt.Errorf("authentication refused: %s", errParam)}
 			return
 		}
 		code := strings.TrimSpace(r.URL.Query().Get("code"))
 		if code == "" {
 			http.Error(w, "missing authorization code", http.StatusBadRequest)
-			select {
-			case resCh <- callbackResult{err: errors.New("missing authorization code on callback")}:
-			default:
-			}
+			resCh <- callbackResult{err: errors.New("missing authorization code on callback")}
+			return
+		}
+
+		tok, exchErr := exchangeAndSaveCLIToken(ctx, client, store, serverURL, redirectURI, code, pkce.Verifier)
+		if exchErr != nil {
+			http.Error(w, "ipso CLI token exchange failed. Check your terminal for details.", http.StatusBadGateway)
+			resCh <- callbackResult{err: exchErr}
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "ipso CLI login succeeded. You may close this window.\n")
-		select {
-		case resCh <- callbackResult{code: code}:
-		default:
-		}
+		resCh <- callbackResult{tok: tok}
 	})
 	srv := &http.Server{
 		Handler:           mux,
@@ -286,7 +325,6 @@ func Login(ctx context.Context, opts LoginOptions) (TokenResponse, error) {
 		_ = opts.OpenBrowser(authURL)
 	}
 
-	var code string
 	select {
 	case <-ctx.Done():
 		return TokenResponse{}, ctx.Err()
@@ -294,18 +332,16 @@ func Login(ctx context.Context, opts LoginOptions) (TokenResponse, error) {
 		if cb.err != nil {
 			return TokenResponse{}, cb.err
 		}
-		code = cb.code
+		return cb.tok, nil
 	}
+}
 
+func exchangeAndSaveCLIToken(ctx context.Context, client *http.Client, store Store, serverURL, redirectURI, code, verifier string) (TokenResponse, error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
-	form.Set("code_verifier", pkce.Verifier)
+	form.Set("code_verifier", verifier)
 	form.Set("redirect_uri", redirectURI)
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: defaultHTTPTimeout}
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/auth/cli/token", strings.NewReader(form.Encode()))
 	if err != nil {
 		return TokenResponse{}, err

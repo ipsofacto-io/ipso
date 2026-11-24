@@ -297,4 +297,52 @@ func TestDeliverLLMCheck(t *testing.T) {
 	if code := run([]string{"compile"}, &out, &errOut, deps{now: func() time.Time { return now }, registry: builtin.Registry()}); code != 0 {
 		t.Fatalf("compile after deliver failed (%d): %s", code, errOut.String())
 	}
+
+	// Delivering mode: block on a warning decision without a deny fixture must be refused.
+	warnEDR := strings.Replace(unverified, "criticality: blocking", "criticality: warning", 1)
+	if err := os.WriteFile(filepath.Join(dir, "docs/decisions/firewall.md"), []byte(warnEDR), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noDenySpec := `{"version":1,"target":"json-snapshot","rubric":"Deny 0.0.0.0/0 egress.","fixtures":[{"id":"ok","expect":"allow","input":"{\"default_egress\":\"deny\"}"}]}`
+	badPayload, _ := json.Marshal(map[string]any{
+		"accepted_checks": []map[string]any{{
+			"id":               "22222222-2222-3333-4444-555555555555",
+			"decision_id":      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			"edr_id":           edrID,
+			"decision_version": 1,
+			"version_in_force": 1,
+			"engine":           "llm",
+			"target":           "json-snapshot",
+			"mode":             "block",
+			"llm_spec":         noDenySpec,
+			"llm_spec_sha256":  llmcheck.SHA256Hex([]byte(noDenySpec)),
+		}},
+	})
+	out.Reset()
+	errOut.Reset()
+	if code := deliverCmd(dir, []string{"-"}, bytes.NewReader(badPayload), &out, &errOut, deps{now: func() time.Time { return now }, registry: builtin.Registry()}); code == 0 {
+		t.Fatal("expected deliverCmd to refuse mode: block llm check without deny fixture on warning decision")
+	}
+}
+
+func TestResolveBYOLLMEndpointAndRedirectRefusal(t *testing.T) {
+	if got := resolveBYOLLMEndpoint("https://api.openai.com/v1"); got != "https://api.openai.com/v1/chat/completions" {
+		t.Fatalf("got %q", got)
+	}
+	if got := resolveBYOLLMEndpoint("http://127.0.0.1:11434"); got != "http://127.0.0.1:11434/v1/chat/completions" {
+		t.Fatalf("got %q", got)
+	}
+	if got := resolveBYOLLMEndpoint("https://llm.acme.io/openai/chat/completions"); got != "https://llm.acme.io/openai/chat/completions" {
+		t.Fatalf("got %q", got)
+	}
+
+	redirectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://127.0.0.1:9/v1/chat/completions", http.StatusFound)
+	}))
+	defer redirectSrv.Close()
+
+	spec := llmcheck.Spec{Version: 1, Target: "json-snapshot", Rubric: "No public egress."}
+	if _, _, _, err := evaluateBYOLLM(t.Context(), redirectSrv.Client(), redirectSrv.URL+"/v1", "local-model", "fw", spec, `{}`); err == nil {
+		t.Fatal("expected BYOLLM redirect to be refused")
+	}
 }

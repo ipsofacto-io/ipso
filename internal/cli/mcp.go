@@ -464,6 +464,7 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 			},
 			Compliance: mcptools.ComplianceHealth{
 				State:  compState,
+				Note:   "local checkout only; stored CI and live drift verdicts require ipso status or remote MCP",
 				Scopes: scopes,
 			},
 		})

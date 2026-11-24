@@ -109,3 +109,61 @@ func TestNormalizeServerURLRefusesPlainHTTPNonLoopback(t *testing.T) {
 		t.Fatalf("loopback HTTP refused: %v", err)
 	}
 }
+
+func TestResolveBindsEnvTokenToConfiguredServer(t *testing.T) {
+	t.Setenv(EnvToken, "ipsocli_abcdefghijklmnopqrstuvwxyz123456")
+	t.Setenv(EnvServerURL, "https://ipso.acme.io")
+	store := NewMemoryStore()
+
+	sess, err := Resolve(store, "")
+	if err != nil || sess.ServerURL != "https://ipso.acme.io" {
+		t.Fatalf("Resolve = %+v, err = %v", sess, err)
+	}
+	if _, err := Resolve(store, "https://evil.example.com"); err == nil {
+		t.Fatal("expected mismatched --server to be refused when IPSO_TOKEN is set")
+	}
+
+	t.Setenv(EnvServerURL, "")
+	if _, err := Resolve(store, "https://evil.example.com"); err == nil {
+		t.Fatal("expected unbound IPSO_TOKEN without IPSO_SERVER_URL or saved server to be refused")
+	}
+}
+
+func TestLoginCallbackReportsFailureWhenTokenExchangeFails(t *testing.T) {
+	var browserStatus int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/cli/start":
+			redirectURI := r.URL.Query().Get("redirect_uri")
+			state := r.URL.Query().Get("state")
+			http.Redirect(w, r, redirectURI+"?code=authcode-fail&state="+url.QueryEscape(state), http.StatusFound)
+		case "/auth/cli/token":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"title":"invalid_login"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := Login(context.Background(), LoginOptions{
+		ServerURL:  srv.URL,
+		Store:      NewMemoryStore(),
+		HTTPClient: srv.Client(),
+		OpenBrowser: func(authURL string) error {
+			resp, err := srv.Client().Get(authURL)
+			if err != nil {
+				return err
+			}
+			browserStatus = resp.StatusCode
+			_ = resp.Body.Close()
+			return nil
+		},
+	})
+	if err == nil {
+		t.Fatal("expected Login to fail when token exchange fails")
+	}
+	if browserStatus != http.StatusBadGateway {
+		t.Fatalf("browser callback status = %d, want %d", browserStatus, http.StatusBadGateway)
+	}
+}

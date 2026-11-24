@@ -337,14 +337,39 @@ func evaluateServerLLM(ctx context.Context, client auth.Client, entry compiler.E
 	return verified, resp.ModelID, resp.PromptVersion, nil
 }
 
+func resolveBYOLLMEndpoint(normalized string) string {
+	trimmed := strings.TrimRight(normalized, "/")
+	switch {
+	case strings.HasSuffix(trimmed, "/chat/completions"):
+		return trimmed
+	case strings.HasSuffix(trimmed, "/v1"):
+		return trimmed + "/chat/completions"
+	default:
+		return trimmed + "/v1/chat/completions"
+	}
+}
+
+func noRedirectHTTPClient(base *http.Client) *http.Client {
+	refuse := func(*http.Request, []*http.Request) error {
+		return errors.New("BYOLLM redirects are refused")
+	}
+	if base == nil {
+		return &http.Client{Timeout: 60 * time.Second, CheckRedirect: refuse}
+	}
+	clone := *base
+	if clone.Timeout == 0 {
+		clone.Timeout = 60 * time.Second
+	}
+	clone.CheckRedirect = refuse
+	return &clone
+}
+
 func evaluateBYOLLM(ctx context.Context, httpClient *http.Client, baseURL, modelID, slug string, spec llmcheck.Spec, redactedInput string) (llmcheck.Answer, string, string, error) {
 	normalized, err := auth.NormalizeServerURL(baseURL)
 	if err != nil {
 		return llmcheck.Answer{}, "", "", err
 	}
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 60 * time.Second}
-	}
+	httpClient = noRedirectHTTPClient(httpClient)
 	payload, err := json.Marshal(map[string]any{
 		"model":       modelID,
 		"temperature": 0,
@@ -356,10 +381,7 @@ func evaluateBYOLLM(ctx context.Context, httpClient *http.Client, baseURL, model
 	if err != nil {
 		return llmcheck.Answer{}, "", "", err
 	}
-	endpoint := normalized
-	if !strings.HasSuffix(endpoint, "/chat/completions") {
-		endpoint = strings.TrimRight(endpoint, "/") + "/v1/chat/completions"
-	}
+	endpoint := resolveBYOLLMEndpoint(normalized)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return llmcheck.Answer{}, "", "", err

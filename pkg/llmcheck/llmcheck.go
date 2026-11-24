@@ -338,8 +338,10 @@ var (
 	emailPattern       = regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)
 )
 
-// Redact strips private keys, bearer credentials, API tokens, key-value secrets, URL credentials,
-// and email addresses before any excerpt leaves the runner or agent (ADR-0160).
+// Redact strips common private keys, bearer credentials, API tokens, key-value secrets, URL credentials,
+// and email addresses before any excerpt leaves the runner or agent (ADR-0160). Because pattern-based
+// redaction is a best-effort defense-in-depth control rather than a formal DLP guarantee against custom
+// or unpatterned secrets, operators must still scope check targets and enable tenant LLM evaluation explicitly.
 func Redact(input string) string {
 	out := pemBlockPattern.ReplaceAllString(input, "[REDACTED_PRIVATE_KEY]")
 	out = authHeaderPattern.ReplaceAllString(out, "${1}[REDACTED_SECRET]")
