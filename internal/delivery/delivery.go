@@ -1,7 +1,7 @@
-// Package delivery brings the accepted agent-edit checks of a control plane into a repository (ADR-0120).
-// It reads an answer the person fetched themselves and opens no connection. For each check it writes the
-// Rego under .ipso/checks, which the agent hooks protect, and adds one entry to the checks of the decision
-// file that holds the EDR id the answer names. ipso compile then builds it like any repository Rego.
+// Package delivery brings the accepted checks of a control plane into a repository (ADR-0120, ADR-0158).
+// For each check it writes the Rego (.rego) or LLM check specification (.llm.json) under .ipso/checks,
+// which the agent hooks protect, and adds one entry to the checks of the decision file that holds the EDR id
+// the answer names. ipso compile then builds it like any repository check.
 package delivery
 
 import (
@@ -24,10 +24,11 @@ import (
 	"github.com/ipsofacto-io/ipso/internal/config"
 	"github.com/ipsofacto-io/ipso/internal/edr"
 	"github.com/ipsofacto-io/ipso/internal/rules"
+	"github.com/ipsofacto-io/ipso/pkg/llmcheck"
 	"github.com/ipsofacto-io/ipso/pkg/rulecheck"
 )
 
-// Dir is where the Rego of a delivered check is written.
+// Dir is where the artifact of a delivered check is written.
 const Dir = ".ipso/checks"
 
 const (
@@ -43,16 +44,21 @@ var (
 	digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
-// Item is one accepted check as the control plane serves it. Rego and RegoSHA256 are null for a check that
-// was accepted for a version of its decision that is not the one in force.
+// Item is one accepted check as the control plane serves it. Engine defaults to "opa" when omitted so
+// ADR-0120 payloads decode unchanged. Engine "llm" carries LLMSpec and LLMSpecSHA256 instead of Rego.
 type Item struct {
 	ID              string  `json:"id"`
 	DecisionID      string  `json:"decision_id"`
 	EDRID           *string `json:"edr_id"`
 	DecisionVersion int     `json:"decision_version"`
 	VersionInForce  int     `json:"version_in_force"`
+	Engine          string  `json:"engine,omitempty"`
+	Target          string  `json:"target,omitempty"`
+	MaxAgeDays      int     `json:"max_age_days,omitempty"`
 	Rego            *string `json:"rego"`
 	RegoSHA256      *string `json:"rego_sha256"`
+	LLMSpec         *string `json:"llm_spec,omitempty"`
+	LLMSpecSHA256   *string `json:"llm_spec_sha256,omitempty"`
 }
 
 // Answer is the body of GET /v1/accepted-checks.
@@ -62,6 +68,13 @@ type Answer struct {
 
 // held reports whether the check was accepted for a version that is not in force. It is never delivered.
 func (i Item) held() bool { return i.DecisionVersion != i.VersionInForce }
+
+func (i Item) effectiveEngine() string {
+	if i.Engine == "" {
+		return "opa"
+	}
+	return i.Engine
+}
 
 // Decode reads an answer and checks its shape. Anything it returns can be used as a file name and compared
 // with a digest, so a malformed answer stops here and nothing is written.
@@ -103,8 +116,25 @@ func (i Item) validate() error {
 		return errors.New("edr_id is not a ULID")
 	case i.DecisionVersion < 1 || i.VersionInForce < 1:
 		return errors.New("a version is not a positive number")
+	case i.MaxAgeDays < 0 || i.MaxAgeDays > 365:
+		return errors.New("max_age_days is out of 1..365")
+	}
+	eng := i.effectiveEngine()
+	if eng != "opa" && eng != "llm" {
+		return fmt.Errorf("unsupported engine %q", eng)
 	}
 	if i.held() {
+		return nil
+	}
+	if eng == "llm" {
+		switch {
+		case i.LLMSpec == nil || i.LLMSpecSHA256 == nil:
+			return errors.New("an llm check for the version in force carries its llm_spec and its digest")
+		case len(*i.LLMSpec) > llmcheck.MaxSpecBytes:
+			return fmt.Errorf("llm_spec is over %d bytes", llmcheck.MaxSpecBytes)
+		case !digestPattern.MatchString(*i.LLMSpecSHA256):
+			return errors.New("llm_spec_sha256 is not 64 lowercase hex digits")
+		}
 		return nil
 	}
 	switch {
@@ -122,9 +152,9 @@ func (i Item) validate() error {
 type Status string
 
 const (
-	// Added: the Rego or the entry was written.
+	// Added: the check artifact or the entry was written.
 	Added Status = "added"
-	// Present: the Rego and the entry were already there, and nothing was written.
+	// Present: the check artifact and the entry were already there, and nothing was written.
 	Present Status = "present"
 	// Held: accepted for a version of its decision that is not in force, so it was not delivered.
 	Held Status = "held"
@@ -133,7 +163,7 @@ const (
 )
 
 // Result is the outcome for one check, in the order of the answer. File is the decision file of an added or
-// present check, and Detail says why a check was held or skipped.
+// present check, Rego is the delivered artifact path under .ipso/checks, and Detail says why a check was held or skipped.
 type Result struct {
 	Item   Item
 	Status Status
@@ -143,11 +173,9 @@ type Result struct {
 }
 
 // Deliver delivers an answer into the repository at root. Every check is verified before anything is
-// written: its digest must match its Rego, the Rego must pass the vet that ipso compile runs, a file in
+// written: its digest must match its payload, the payload must pass the vet that ipso compile runs, a file in
 // .ipso/checks must not hold other bytes, no path may be a symlink, every decision file must be valid, and
-// the rewritten decision file must hold nothing but the one added check. A problem in any of them is
-// returned, one line each, and nothing is written. The Rego files are written first and the decision files
-// after, so a failure part way leaves only files that a second run accepts.
+// the rewritten decision file must hold nothing but the one added check.
 func Deliver(root string, cfg config.Config, answer Answer, now time.Time) ([]Result, []string, error) {
 	loaded, problems, err := edr.Load(root, cfg.Decisions)
 	if err != nil {
@@ -186,7 +214,11 @@ func Deliver(root string, cfg config.Config, answer Answer, now time.Time) ([]Re
 
 	texts := map[string]string{}
 	changed := map[string]bool{}
-	var newRego []Result
+	type pendingArtifact struct {
+		path    string
+		content string
+	}
+	var newArtifacts []pendingArtifact
 	results := make([]Result, 0, len(answer.AcceptedChecks))
 	for _, item := range answer.AcceptedChecks {
 		result := Result{Item: item}
@@ -208,18 +240,22 @@ func Deliver(root string, cfg config.Config, answer Answer, now time.Time) ([]Re
 				break
 			}
 			result.File = file.Shown
-			result.Rego = path.Join(Dir, item.ID+".rego")
-			wrote, problem := plan(repo, root, &result, item, file, texts, changed)
+			if item.effectiveEngine() == "llm" {
+				result.Rego = path.Join(Dir, item.ID+".llm.json")
+			} else {
+				result.Rego = path.Join(Dir, item.ID+".rego")
+			}
+			wrote, content, problem := plan(repo, root, &result, item, file, texts, changed)
 			if problem != "" {
 				problems = append(problems, problem)
 				break
 			}
 			result.Status = Present
-			if wrote.entry || wrote.rego {
+			if wrote.entry || wrote.artifact {
 				result.Status = Added
 			}
-			if wrote.rego {
-				newRego = append(newRego, result)
+			if wrote.artifact {
+				newArtifacts = append(newArtifacts, pendingArtifact{path: result.Rego, content: content})
 			}
 		}
 		results = append(results, result)
@@ -228,9 +264,9 @@ func Deliver(root string, cfg config.Config, answer Answer, now time.Time) ([]Re
 		return results, problems, nil
 	}
 
-	for _, result := range newRego {
-		if err := writeNew(repo, result.Rego, *result.Item.Rego); err != nil {
-			return results, nil, fmt.Errorf("write %s: %w", result.Rego, err)
+	for _, art := range newArtifacts {
+		if err := writeNew(repo, art.path, art.content); err != nil {
+			return results, nil, fmt.Errorf("write %s: %w", art.path, err)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(changed)) {
@@ -241,52 +277,85 @@ func Deliver(root string, cfg config.Config, answer Answer, now time.Time) ([]Re
 	return results, nil, nil
 }
 
-type writes struct{ rego, entry bool }
+type writes struct{ artifact, entry bool }
 
-// plan verifies one deliverable check and folds its entry into the text of its decision file. It returns a
-// problem and no writes when the check must stop the whole delivery.
-func plan(repo *os.Root, root string, result *Result, item Item, file edr.Loaded, texts map[string]string, changed map[string]bool) (writes, string) {
-	rego := []byte(*item.Rego)
-	sum := sha256.Sum256(rego)
-	if hex.EncodeToString(sum[:]) != *item.RegoSHA256 {
-		return writes{}, fmt.Sprintf("check %s: the digest does not match the rego", item.ID)
-	}
-	if _, err := rulecheck.Compile(rego); err != nil {
-		return writes{}, fmt.Sprintf("check %s: %s: %s", item.ID, rulecheck.Code(err), err)
+// plan verifies one deliverable check and folds its entry into the text of its decision file.
+func plan(repo *os.Root, root string, result *Result, item Item, file edr.Loaded, texts map[string]string, changed map[string]bool) (writes, string, string) {
+	eng := item.effectiveEngine()
+	var payload string
+	var addCheck edr.Check
+	if eng == "llm" {
+		raw := []byte(*item.LLMSpec)
+		sum := sha256.Sum256(raw)
+		if hex.EncodeToString(sum[:]) != *item.LLMSpecSHA256 {
+			return writes{}, "", fmt.Sprintf("check %s: the digest does not match the llm_spec", item.ID)
+		}
+		requireBlock := file.Rec.Criticality == "blocking"
+		spec, err := llmcheck.ParseAndValidate(raw, item.Target, requireBlock)
+		if err != nil {
+			return writes{}, "", fmt.Sprintf("check %s: %s", item.ID, err)
+		}
+		payload = *item.LLMSpec
+		addCheck = edr.Check{
+			Engine:     "llm",
+			Target:     spec.Target,
+			Ref:        result.Rego,
+			MaxAgeDays: item.MaxAgeDays,
+		}
+	} else {
+		rego := []byte(*item.Rego)
+		sum := sha256.Sum256(rego)
+		if hex.EncodeToString(sum[:]) != *item.RegoSHA256 {
+			return writes{}, "", fmt.Sprintf("check %s: the digest does not match the rego", item.ID)
+		}
+		if _, err := rulecheck.Compile(rego); err != nil {
+			return writes{}, "", fmt.Sprintf("check %s: %s: %s", item.ID, rulecheck.Code(err), err)
+		}
+		payload = *item.Rego
+		target := item.Target
+		if target == "" {
+			target = "agent-edit"
+		}
+		addCheck = edr.Check{
+			Engine:     "opa",
+			Target:     target,
+			Ref:        result.Rego,
+			MaxAgeDays: item.MaxAgeDays,
+		}
 	}
 	for _, name := range []string{result.Rego, file.Shown} {
 		if err := rules.RefuseSymlinks(repo, name); err != nil {
-			return writes{}, fmt.Sprintf("check %s: %s", item.ID, err)
+			return writes{}, "", fmt.Sprintf("check %s: %s", item.ID, err)
 		}
 	}
 	var out writes
 	existing, err := repo.ReadFile(result.Rego)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		out.rego = true
+		out.artifact = true
 	case err != nil:
-		return writes{}, fmt.Sprintf("check %s: read %s: %s", item.ID, result.Rego, err)
-	case string(existing) != *item.Rego:
-		return writes{}, fmt.Sprintf("check %s: %s exists with other contents, and delivery never replaces a file", item.ID, result.Rego)
+		return writes{}, "", fmt.Sprintf("check %s: read %s: %s", item.ID, result.Rego, err)
+	case string(existing) != payload:
+		return writes{}, "", fmt.Sprintf("check %s: %s exists with other contents, and delivery never replaces a file", item.ID, result.Rego)
 	}
 	text, ok := texts[file.Shown]
 	if !ok {
 		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(file.Shown)))
 		if err != nil {
-			return writes{}, fmt.Sprintf("%s: %s", file.Shown, err)
+			return writes{}, "", fmt.Sprintf("%s: %s", file.Shown, err)
 		}
 		text = string(raw)
 	}
-	next, added, err := edr.AddCheck(text, edr.Check{Engine: "opa", Target: "agent-edit", Ref: result.Rego})
+	next, added, err := edr.AddCheck(text, addCheck)
 	if err != nil {
-		return writes{}, fmt.Sprintf("%s: check %s: %s", file.Shown, item.ID, err)
+		return writes{}, "", fmt.Sprintf("%s: check %s: %s", file.Shown, item.ID, err)
 	}
 	texts[file.Shown] = next
 	if added {
 		out.entry = true
 		changed[file.Shown] = true
 	}
-	return out, ""
+	return out, payload, ""
 }
 
 // writeNew creates the file and its directories. It never replaces a file.
@@ -298,14 +367,14 @@ func writeNew(repo *os.Root, name, text string) error {
 	if err != nil {
 		return err
 	}
-	_, err = file.WriteString(text)
+	_, err = io.WriteString(file, text)
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
 	return err
 }
 
-// replace writes the file through a temporary file in its directory, with the mode the file had.
+// replace writes text to a temporary file next to name and renames it over name, keeping name's mode.
 func replace(repo *os.Root, name, text string) error {
 	info, err := repo.Stat(name)
 	if err != nil {

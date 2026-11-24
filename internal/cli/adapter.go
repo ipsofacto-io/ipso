@@ -89,6 +89,7 @@ func adapterCmd(root string, args []string, check adapterCheck, stdout, stderr i
 		Adapter:       check.name,
 		InputSHA256:   input.SHA256(),
 		BuildSHA256:   build.SHA256(),
+		Live:          opts.live,
 		Verdicts:      verdicts,
 	}
 	if err := writeOutputs(opts.report, opts.sarif, sarif.Category(check.name, opts.env, opts.input), checks, func() ([]byte, error) {

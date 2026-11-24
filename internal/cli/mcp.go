@@ -364,9 +364,201 @@ func toolDecision(item edr.Loaded) mcptools.Decision {
 		if err != nil {
 			mode = "unknown"
 		}
-		decision.Checks = append(decision.Checks, mcptools.Check{Engine: check.Engine, Target: check.Target, Mode: mode})
+		decision.Checks = append(decision.Checks, mcptools.Check{
+			Engine:     check.Engine,
+			Target:     check.Target,
+			Mode:       mode,
+			MaxAgeDays: check.MaxAgeDays,
+		})
 	}
 	return decision
+}
+
+func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcptools.HealthOutput, error) {
+	cfg, _, err := config.Load(b.root)
+	if err != nil {
+		return mcptools.HealthOutput{}, err
+	}
+	loaded, problems, err := edr.Load(b.root, cfg.Decisions)
+	if err != nil {
+		return mcptools.HealthOutput{}, err
+	}
+	if len(problems) > 0 {
+		return mcptools.HealthOutput{}, fmt.Errorf("invalid decision files: %s", compiler.EscapeControls(strings.Join(problems, "; ")))
+	}
+	now := b.d.now()
+	q := strings.ToLower(strings.TrimSpace(in.Query))
+	out := mcptools.HealthOutput{Decisions: []mcptools.DecisionHealth{}}
+	for _, item := range loaded {
+		if in.Ref != "" && item.Rec.ID != in.Ref && item.Rec.Slug != in.Ref {
+			continue
+		}
+		if (in.Repo != "" || in.Env != "") && !item.Rec.Applies(in.Repo, nil, in.Env) {
+			continue
+		}
+		sensitive := slices.Contains(item.Rec.Tags, rules.SensitiveTag)
+		title := ""
+		statement := ""
+		if !sensitive {
+			title = item.Doc.Title()
+			text, _ := edr.DecisionText(item.Doc.Body)
+			statement = strings.TrimSpace(text)
+		}
+		if q != "" {
+			haystack := strings.ToLower(item.Rec.Slug + " " + strings.Join(item.Rec.Tags, " "))
+			if !sensitive {
+				haystack += " " + strings.ToLower(title+" "+statement)
+			}
+			if !strings.Contains(haystack, q) {
+				continue
+			}
+		}
+		valState := localValidityState(item.Rec, now)
+		validTo := ""
+		if item.Rec.ValidTo != nil {
+			validTo = item.Rec.ValidTo.Format("2006-01-02")
+		}
+		compState := "unverified"
+		waived := false
+		for _, w := range item.Rec.Waivers {
+			if w.InForce(now) {
+				waived = true
+				break
+			}
+		}
+		if waived && len(item.Rec.Checks) > 0 {
+			compState = "waived"
+		}
+		scopes := []mcptools.ScopeCompliance{}
+		for _, sc := range item.Rec.Scope {
+			if len(sc.Env) == 0 {
+				scopes = append(scopes, mcptools.ScopeCompliance{
+					Repo:   sc.Repo,
+					State:  compState,
+					Waived: waived,
+				})
+				continue
+			}
+			for _, env := range sc.Env {
+				scopes = append(scopes, mcptools.ScopeCompliance{
+					Repo:   sc.Repo,
+					Env:    env,
+					State:  compState,
+					Waived: waived,
+				})
+			}
+		}
+		out.Decisions = append(out.Decisions, mcptools.DecisionHealth{
+			ID:          item.Rec.ID,
+			Slug:        item.Rec.Slug,
+			Title:       title,
+			Criticality: item.Rec.Criticality,
+			Sensitive:   sensitive,
+			Validity: mcptools.ValidityHealth{
+				State:              valState,
+				Status:             item.Rec.Status,
+				ValidFrom:          item.Rec.ValidFrom.Format("2006-01-02"),
+				ValidTo:            validTo,
+				ReviewBy:           item.Rec.ReviewBy.Format("2006-01-02"),
+				OpenPremiseReasons: []mcptools.PremiseAlert{},
+			},
+			Compliance: mcptools.ComplianceHealth{
+				State:  compState,
+				Scopes: scopes,
+			},
+		})
+	}
+	return out, nil
+}
+
+func localValidityState(rec edr.Record, now time.Time) string {
+	switch rec.Status {
+	case "superseded":
+		return "superseded"
+	case "deprecated", "rejected":
+		return "deprecated"
+	case "needs-review", "proposed":
+		return "needs_review"
+	}
+	if !rec.InForce(now) {
+		return "expired"
+	}
+	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	if !rec.ReviewBy.IsZero() && today.After(rec.ReviewBy) {
+		return "needs_review"
+	}
+	return "valid"
+}
+
+func (b *localBackend) Verifiability(_ context.Context, in mcptools.VerifiabilityInput) (mcptools.VerifiabilityOutput, error) {
+	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Statement) == "" {
+		return mcptools.VerifiabilityOutput{}, errors.New("title and statement are required")
+	}
+	return localVerifiability(in), nil
+}
+
+func localVerifiability(in mcptools.VerifiabilityInput) mcptools.VerifiabilityOutput {
+	lower := strings.ToLower(in.Title + " " + in.Statement + " " + in.Context)
+	vagueTerms := []string{"where appropriate", "when possible", "try to", "reasonable", "best effort", "prefer where sensible", "as needed"}
+	for _, term := range vagueTerms {
+		if strings.Contains(lower, term) {
+			return mcptools.VerifiabilityOutput{
+				Classification: "ambiguous",
+				Summary:        fmt.Sprintf("Statement contains non-deterministic qualifier %q; replace with an explicit scope, resource attribute, or measurable invariant.", term),
+				Suggestions: []string{
+					"Replace discretionary qualifiers with explicit MUST / MUST NOT invariants and named scope exceptions.",
+					"Add a concrete check (OPA, Semgrep, Kyverno, or engine: llm with allow/deny fixtures) once the invariant is specific.",
+				},
+				CandidateChecks:   []mcptools.CandidateCheck{},
+				CandidatePremises: []mcptools.CandidatePremise{},
+				AIGenerated:       false,
+			}
+		}
+	}
+	checks := []mcptools.CandidateCheck{}
+	switch {
+	case strings.Contains(lower, "terraform") || strings.Contains(lower, "tofu") || strings.Contains(lower, "firewall") || strings.Contains(lower, "egress") || strings.Contains(lower, "s3") || strings.Contains(lower, "ebs"):
+		checks = append(checks,
+			mcptools.CandidateCheck{
+				Engine:     "opa",
+				Target:     "terraform-plan",
+				Mode:       "block",
+				MaxAgeDays: 7,
+				Rationale:  "Infrastructure resources and network rules can be checked deterministically on Terraform/OpenTofu plans and scheduled refresh-only snapshots.",
+			},
+			mcptools.CandidateCheck{
+				Engine:     "llm",
+				Target:     "json-snapshot",
+				Mode:       "warn",
+				MaxAgeDays: 7,
+				Rationale:  "Exported firewall or cloud policy snapshots can also be evaluated with a grounded engine: llm rubric and verbatim quote verification.",
+			},
+		)
+	case strings.Contains(lower, "kubernetes") || strings.Contains(lower, "pod") || strings.Contains(lower, "ingress") || strings.Contains(lower, "namespace"):
+		checks = append(checks, mcptools.CandidateCheck{
+			Engine:     "kyverno",
+			Target:     "kubernetes",
+			Mode:       "block",
+			MaxAgeDays: 7,
+			Rationale:  "Kubernetes manifests and live cluster exports can be verified with Kyverno policies.",
+		})
+	default:
+		checks = append(checks, mcptools.CandidateCheck{
+			Engine:     "llm",
+			Target:     "diff",
+			Mode:       "warn",
+			MaxAgeDays: 14,
+			Rationale:  "Architectural prose rules without a structural AST pattern can use engine: llm with approved allow/deny fixtures and verbatim quote grounding.",
+		})
+	}
+	return mcptools.VerifiabilityOutput{
+		Classification:    "verifiable",
+		Summary:           "Statement expresses an enforceable invariant that can be paired with automated checks.",
+		Suggestions:       []string{},
+		CandidateChecks:   checks,
+		CandidatePremises: []mcptools.CandidatePremise{},
+		AIGenerated:       false,
+	}
 }
 
 func notEvaluated(build compiler.Build, target string) []string {

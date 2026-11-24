@@ -30,6 +30,19 @@ func (f *fakeBackend) Propose(_ context.Context, in ProposeInput) (ProposeOutput
 	return ProposeOutput{ProposalID: "p1", Status: "proposed"}, nil
 }
 
+func (f *fakeBackend) Health(context.Context, HealthInput) (HealthOutput, error) {
+	return HealthOutput{Decisions: []DecisionHealth{}}, nil
+}
+
+func (f *fakeBackend) Verifiability(context.Context, VerifiabilityInput) (VerifiabilityOutput, error) {
+	return VerifiabilityOutput{
+		Classification:    "verifiable",
+		Suggestions:       []string{},
+		CandidateChecks:   []CandidateCheck{},
+		CandidatePremises: []CandidatePremise{},
+	}, nil
+}
+
 func ask(t *testing.T, server *Server, message string) map[string]any {
 	t.Helper()
 	raw := server.Handle(context.Background(), []byte(message))
@@ -61,7 +74,7 @@ func TestLegacyClientsGetTheHandshakeAndPlainResults(t *testing.T) {
 	if _, ok := result["resultType"]; ok {
 		t.Errorf("a legacy result has no resultType: %v", result)
 	}
-	if len(result["tools"].([]any)) != 4 {
+	if len(result["tools"].([]any)) != 6 {
 		t.Errorf("tools: %v", result["tools"])
 	}
 	if reply := ask(t, server, `{"jsonrpc":"2.0","id":3,"method":"ping"}`); reply["error"] != nil {
@@ -209,8 +222,10 @@ func TestSchemasMatchTheInputTypes(t *testing.T) {
 	}{
 		{applicableSchema, ApplicableInput{}},
 		{getSchema, GetInput{}},
+		{healthSchema, HealthInput{}},
 		{evaluateSchema, EvaluateInput{}},
 		{proposeSchema, ProposeInput{}},
+		{verifiabilitySchema, VerifiabilityInput{}},
 	} {
 		var schema struct {
 			Properties map[string]any `json:"properties"`

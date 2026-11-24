@@ -94,6 +94,9 @@ func Materialize(manifest []byte, open func(rel string) ([]byte, error)) (Build,
 		if err := entry.dates(); err != nil {
 			return Build{}, &Error{Code: CodeBuildManifest, Err: err}
 		}
+		if entry.MaxAgeDays < 0 || entry.MaxAgeDays > 365 {
+			return Build{}, &Error{Code: CodeBuildManifest, Err: fmt.Errorf("decision %s check %d: max_age_days %d out of 1..365", entry.DecisionID, entry.CheckIndex, entry.MaxAgeDays)}
+		}
 		if err := entry.Baseline.validate(); err != nil {
 			return Build{}, &Error{Code: CodeBuildManifest, Err: fmt.Errorf("decision %s check %d: %w", entry.DecisionID, entry.CheckIndex, err)}
 		}
@@ -229,6 +232,17 @@ func (e Entry) SelectedFor(target, env string, now time.Time) bool {
 	return e.Applies(env, now)
 }
 
+// SelectedEngineTarget reports whether the entry matches engine (and target when non-empty) and is in force.
+func (e Entry) SelectedEngineTarget(engine, target, env string, now time.Time) bool {
+	if e.Engine != engine {
+		return false
+	}
+	if target != "" && e.Target != "" && e.Target != target {
+		return false
+	}
+	return e.Applies(env, now)
+}
+
 // Violation is one denial from a check. The terminal prints it. The report stores only the count.
 // Position is set by engines that report a place in a repository file, and SARIF is its only reader.
 // Identity is the raw values that feed a baseline fingerprint (ADR-0059), and no output prints it.
@@ -346,13 +360,15 @@ func contains(values []string, want string) bool {
 // entry, did not fail to evaluate, is not covered by a waiver, and has an identity for every violation: it holds
 // all of the violations or none.
 type Verdict struct {
-	DecisionID   string   `json:"decision_id"`
-	Slug         string   `json:"slug"`
-	CheckIndex   int      `json:"check_index"`
-	Mode         string   `json:"mode"`
-	Result       string   `json:"result"`
-	Violations   int      `json:"violations"`
-	Fingerprints []string `json:"fingerprints"`
+	DecisionID    string   `json:"decision_id"`
+	Slug          string   `json:"slug"`
+	CheckIndex    int      `json:"check_index"`
+	Mode          string   `json:"mode"`
+	Result        string   `json:"result"`
+	Violations    int      `json:"violations"`
+	Fingerprints  []string `json:"fingerprints"`
+	ModelID       string   `json:"model_id,omitempty"`
+	PromptVersion string   `json:"prompt_version,omitempty"`
 }
 
 // PlanReport is the local verdict report. It carries counts and hashes, never plan contents.
@@ -363,6 +379,7 @@ type PlanReport struct {
 	Env           string    `json:"env"`
 	PlanSHA256    string    `json:"plan_sha256"`
 	BuildSHA256   string    `json:"build_sha256"`
+	Live          bool      `json:"live,omitempty"`
 	Verdicts      []Verdict `json:"verdicts"`
 }
 
@@ -443,6 +460,7 @@ type KyvernoReport struct {
 	Paths          []string  `json:"paths"`
 	KyvernoVersion string    `json:"kyverno_version"`
 	BuildSHA256    string    `json:"build_sha256"`
+	Live           bool      `json:"live,omitempty"`
 	Verdicts       []Verdict `json:"verdicts"`
 }
 
@@ -457,6 +475,7 @@ type GatekeeperReport struct {
 	Paths         []string  `json:"paths"`
 	GatorVersion  string    `json:"gator_version"`
 	BuildSHA256   string    `json:"build_sha256"`
+	Live          bool      `json:"live,omitempty"`
 	Verdicts      []Verdict `json:"verdicts"`
 }
 
@@ -482,6 +501,7 @@ type CheckovReport struct {
 	Env            string    `json:"env"`
 	EvidenceSHA256 string    `json:"evidence_sha256"`
 	BuildSHA256    string    `json:"build_sha256"`
+	Live           bool      `json:"live,omitempty"`
 	Verdicts       []Verdict `json:"verdicts"`
 }
 
@@ -494,6 +514,7 @@ type FindingsReport struct {
 	Env            string    `json:"env"`
 	EvidenceSHA256 string    `json:"evidence_sha256"`
 	BuildSHA256    string    `json:"build_sha256"`
+	Live           bool      `json:"live,omitempty"`
 	Verdicts       []Verdict `json:"verdicts"`
 }
 
@@ -507,6 +528,21 @@ type AdapterReport struct {
 	Adapter       string    `json:"adapter"`
 	InputSHA256   string    `json:"input_sha256"`
 	BuildSHA256   string    `json:"build_sha256"`
+	Live           bool      `json:"live,omitempty"`
+	Verdicts      []Verdict `json:"verdicts"`
+}
+
+// LLMReport is the verdict report for ipso check llm (ADR-0158, ADR-0160).
+// It carries only the redacted input digest, target, build digest, and per-verdict model/prompt identifiers, never artifact text or quotes.
+type LLMReport struct {
+	ReportVersion int       `json:"report_version"`
+	IpsoVersion   string    `json:"ipso_version"`
+	EvaluatedAt   time.Time `json:"evaluated_at"`
+	Env           string    `json:"env"`
+	Target        string    `json:"target"`
+	InputSHA256   string    `json:"input_sha256"`
+	BuildSHA256   string    `json:"build_sha256"`
+	Live          bool      `json:"live,omitempty"`
 	Verdicts      []Verdict `json:"verdicts"`
 }
 
@@ -664,6 +700,12 @@ func MarshalESLintReport(report ESLintReport) ([]byte, error) {
 	if report.Paths == nil {
 		report.Paths = []string{}
 	}
+	return encodeReport(report)
+}
+
+// MarshalLLMReport encodes an engine: llm report as deterministic JSON.
+func MarshalLLMReport(report LLMReport) ([]byte, error) {
+	report.EvaluatedAt, report.Verdicts = finishReport(report.EvaluatedAt, report.Verdicts)
 	return encodeReport(report)
 }
 

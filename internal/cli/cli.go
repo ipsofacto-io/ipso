@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/ipsofacto-io/ipso/internal/auth"
 	"github.com/ipsofacto-io/ipso/internal/baseline"
 	"github.com/ipsofacto-io/ipso/internal/bundle"
 	"github.com/ipsofacto-io/ipso/internal/compiler"
@@ -40,6 +42,9 @@ type deps struct {
 	now         func() time.Time
 	registry    compiler.Registry
 	probeClient premise.Client
+	authStore   auth.Store
+	httpClient  *http.Client
+	openBrowser func(string) error
 	// capture collects raw outcomes for ipso baseline. Set, it also stops the stamped baseline from applying.
 	capture *capturedChecks
 }
@@ -102,6 +107,14 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		return mcpCmd(root, args[1:], os.Stdin, stdout, stderr, d)
 	case "hook":
 		return hookCmd(args[1:], os.Stdin, stdout, stderr, d)
+	case "login":
+		return loginCmd(args[1:], stdout, stderr, d)
+	case "logout":
+		return logoutCmd(args[1:], stdout, stderr, d)
+	case "status":
+		return statusCmd(args[1:], stdout, stderr, d)
+	case "draft":
+		return draftCmd(args[1:], stdout, stderr, d)
 	case "-h", "--help", "help", "version", "--version", "-v":
 		fprintln(stdout, helpText())
 		return 0
@@ -144,9 +157,14 @@ usage:
   ipso check kyverno <path>... [--env name] [--input name] [--report file] [--sarif file]
   ipso check gatekeeper <path>... [--env name] [--input name] [--report file] [--sarif file]
   ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]
+  ipso check llm <input|-> [--target kind] [--env name] [--input name] [--live] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem] [--server url] [--llm-url url --llm-model id]
   ipso explain <slug>
   ipso import [path...]
-  ipso deliver <accepted-checks.json|->
+  ipso deliver <accepted-checks.json|-> | --repo <owner/name> [--server url]
+  ipso login [--server <url>] [--no-browser]
+  ipso logout [--server <url>]
+  ipso status [ref] [--query <text>] [--repo <owner/name>] [--env <name>] [--server <url>] [--json]
+  ipso draft --title <title> --statement <text> [--context <text>] [--owner <team:slug>] [--repo <owner/name>] [--env <name>] [--criticality blocking|warning|advisory] [--approve] [--analyze-only] [--server <url>] [--json]
   ipso premise check [--report file]
   ipso baseline create|update <subcommand> <args>
   ipso baseline export <decision-id>
@@ -208,6 +226,8 @@ func checkCmd(root string, args []string, stdout, stderr io.Writer, d deps) int 
 		return gatekeeperCmd(root, args[1:], stdout, stderr, d)
 	case "eslint":
 		return eslintCmd(root, args[1:], stdout, stderr, d)
+	case "llm":
+		return llmCmd(root, args[1:], stdout, stderr, d)
 	default:
 		fprintln(stderr, checkUsage)
 		return 2
@@ -269,7 +289,7 @@ const (
 	kyvernoUsage      = "usage: ipso check kyverno <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	gatekeeperUsage   = "usage: ipso check gatekeeper <path>... [--env name] [--input name] [--report file] [--sarif file]"
 	eslintUsage       = "usage: ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]"
-	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + snykUsage + "\n" + wizUsage + "\n" + sonarqubeUsage + "\n" + dependabotUsage + "\n" + pulumiUsage + "\n" + cloudformationUsage + "\n" + armUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage
+	checkUsage        = planUsage + "\n" + ciUsage + "\n" + checkovUsage + "\n" + snykUsage + "\n" + wizUsage + "\n" + sonarqubeUsage + "\n" + dependabotUsage + "\n" + pulumiUsage + "\n" + cloudformationUsage + "\n" + armUsage + "\n" + depcruiseUsage + "\n" + semgrepUsage + "\n" + archunitUsage + "\n" + importlinterUsage + "\n" + kyvernoUsage + "\n" + gatekeeperUsage + "\n" + eslintUsage + "\n" + llmUsage
 )
 
 func planCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
@@ -316,6 +336,7 @@ func planCmd(root string, args []string, stdout, stderr io.Writer, d deps) int {
 		Env:           opts.env,
 		PlanSHA256:    plan.SHA256(),
 		BuildSHA256:   build.SHA256(),
+		Live:          opts.live,
 	}
 	verdicts, checks, failed, selected, err := evaluateChecks(d, baseline.Scope{Env: opts.env, Input: opts.input}, stdout, build, func(entry compiler.Entry) bool {
 		return entry.Selected(opts.env, now)
@@ -451,6 +472,7 @@ func checkovCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 		Env:            opts.env,
 		EvidenceSHA256: results.SHA256(),
 		BuildSHA256:    build.SHA256(),
+		Live:           opts.live,
 		Verdicts:       verdicts,
 	}
 	if err := writeOutputs(opts.report, opts.sarif, sarif.Category("checkov", opts.env, opts.input), checks, func() ([]byte, error) {
@@ -510,6 +532,7 @@ func findingCmd(root, tool string, args []string, stdout, stderr io.Writer, d de
 		Env:            opts.env,
 		EvidenceSHA256: evidence.SHA256(),
 		BuildSHA256:    build.SHA256(),
+		Live:           opts.live,
 		Verdicts:       verdicts,
 	}
 	if err := writeOutputs(opts.report, opts.sarif, sarif.Category(tool, opts.env, opts.input), checks, func() ([]byte, error) {
@@ -801,6 +824,7 @@ func kyvernoCmd(root string, args []string, stdout, stderr io.Writer, d deps) in
 		Env:           opts.env,
 		Paths:         opts.paths,
 		BuildSHA256:   build.SHA256(),
+		Live:          opts.live,
 		Verdicts:      verdicts,
 	}
 	if envErr == nil && selectedCount > 0 {
@@ -874,6 +898,7 @@ func gatekeeperCmd(root string, args []string, stdout, stderr io.Writer, d deps)
 		Env:           opts.env,
 		Paths:         opts.paths,
 		BuildSHA256:   build.SHA256(),
+		Live:          opts.live,
 		Verdicts:      verdicts,
 	}
 	if envErr == nil && selectedCount > 0 {
@@ -1045,6 +1070,7 @@ type planOptions struct {
 	path   string
 	env    string
 	input  string
+	live   bool
 	report string
 	sarif  string
 	bundle string
@@ -1056,6 +1082,8 @@ func parsePlanArgs(args []string) (planOptions, error) {
 	var opts planOptions
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--live":
+			opts.live = true
 		case "--env":
 			if opts.env != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
 				return planOptions{}, fmt.Errorf("%s", planUsage)
@@ -1121,6 +1149,7 @@ type cruiseOptions struct {
 	paths  []string
 	env    string
 	input  string
+	live   bool
 	report string
 	sarif  string
 	jars   string
@@ -1132,6 +1161,8 @@ func parsePathArgs(args []string, usage string, jars bool) (cruiseOptions, error
 	var opts cruiseOptions
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--live":
+			opts.live = true
 		case "--jars":
 			if !jars || opts.jars != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
 				return cruiseOptions{}, fmt.Errorf("%s", usage)
@@ -1183,6 +1214,7 @@ type boundOptions struct {
 	path   string
 	env    string
 	input  string
+	live   bool
 	report string
 	sarif  string
 	sha    string
@@ -1192,6 +1224,11 @@ func parseBoundArgs(args []string, usage string, sha bool) (boundOptions, error)
 	var opts boundOptions
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--live":
+			if sha {
+				return boundOptions{}, fmt.Errorf("%s", usage)
+			}
+			opts.live = true
 		case "--env":
 			if opts.env != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
 				return boundOptions{}, fmt.Errorf("%s", usage)
