@@ -11,11 +11,12 @@ import (
 
 // Check is one object from the checks array.
 type Check struct {
-	Engine string
-	Target string
-	Ref    string
-	Job    string
-	Mode   string
+	Engine     string
+	Target     string
+	Ref        string
+	Job        string
+	Mode       string
+	MaxAgeDays int
 }
 
 // ScopeItem is one object from the scope array.
@@ -57,6 +58,7 @@ type Record struct {
 	Criticality string
 	ValidFrom   time.Time
 	ValidTo     *time.Time
+	ReviewBy    time.Time
 	Scope       []ScopeItem
 	Tags        []string
 	Checks      []Check
@@ -102,6 +104,11 @@ func RecordFrom(doc Document) (Record, error) {
 			return Record{}, err
 		}
 		rec.ValidTo = &parsed
+	}
+	if reviewText, err := requireString(doc.Front, "review_by"); err == nil {
+		if parsed, parseErr := parseDate("review_by", reviewText); parseErr == nil {
+			rec.ReviewBy = parsed
+		}
 	}
 	rec.Scope, err = scopeFrom(doc.Front["scope"])
 	if err != nil {
@@ -420,6 +427,13 @@ func checksFrom(raw any) ([]Check, error) {
 		}
 		if check.Mode, err = optionalString(mapping, "mode"); err != nil {
 			return nil, fmt.Errorf("checks[%d]: %w", i, err)
+		}
+		if rawAge, ok := mapping["max_age_days"]; ok && rawAge != nil {
+			age, valid := wholeInt(rawAge)
+			if !valid {
+				return nil, fmt.Errorf("checks[%d]: max_age_days: not an integer in 1..365", i)
+			}
+			check.MaxAgeDays = age
 		}
 		checks = append(checks, check)
 	}

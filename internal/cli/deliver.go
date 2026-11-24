@@ -1,37 +1,90 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"io"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/ipsofacto-io/ipso/internal/auth"
 	"github.com/ipsofacto-io/ipso/internal/config"
 	"github.com/ipsofacto-io/ipso/internal/delivery"
 )
 
-const deliverUsage = "usage: ipso deliver <accepted-checks.json|->"
+const deliverUsage = "usage: ipso deliver <accepted-checks.json|-> | --repo <owner/name> [--server url]"
 
-// deliverCmd brings the accepted agent-edit checks of a control plane into this repository (ADR-0120). It
-// reads the answer of GET /v1/accepted-checks from a file or from stdin and opens no connection. Any
-// problem stops it before it writes anything.
+// deliverCmd brings the accepted checks of a control plane into this repository (ADR-0120, ADR-0158, ADR-0160).
+// Given a file path or "-", it opens no network connection. Given --repo <owner/name>, it fetches
+// GET /v1/accepted-checks?repo=<owner/name> using the active CLI session or IPSO_TOKEN.
 func deliverCmd(root string, args []string, stdin io.Reader, stdout, stderr io.Writer, d deps) int {
-	if len(args) != 1 || args[0] == "" {
+	if len(args) == 0 {
 		fprintln(stderr, deliverUsage)
 		return 2
 	}
 	if d.now == nil {
 		d.now = time.Now
 	}
-	reader := stdin
-	if args[0] != "-" {
-		file, err := os.Open(args[0])
+
+	var reader io.Reader
+	if strings.HasPrefix(args[0], "--") {
+		var repoFlag, serverFlag string
+		for i := 0; i < len(args); i++ {
+			switch args[i] {
+			case "--repo":
+				if repoFlag != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+					fprintln(stderr, deliverUsage)
+					return 2
+				}
+				i++
+				repoFlag = args[i]
+			case "--server":
+				if serverFlag != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+					fprintln(stderr, deliverUsage)
+					return 2
+				}
+				i++
+				serverFlag = args[i]
+			default:
+				fprintln(stderr, deliverUsage)
+				return 2
+			}
+		}
+		if repoFlag == "" {
+			fprintln(stderr, deliverUsage)
+			return 2
+		}
+		sess, err := auth.Resolve(d.authStore, serverFlag)
 		if err != nil {
 			fprintln(stderr, err)
 			return 1
 		}
-		defer func() { _ = file.Close() }()
-		reader = file
+		client := auth.Client{Session: sess, HTTPClient: d.httpClient}
+		raw, err := client.GetRaw(context.Background(), "/v1/accepted-checks?repo="+url.QueryEscape(repoFlag))
+		if err != nil {
+			fprintln(stderr, err)
+			return 1
+		}
+		reader = bytes.NewReader(raw)
+	} else {
+		if len(args) != 1 || args[0] == "" {
+			fprintln(stderr, deliverUsage)
+			return 2
+		}
+		reader = stdin
+		if args[0] != "-" {
+			file, err := os.Open(args[0])
+			if err != nil {
+				fprintln(stderr, err)
+				return 1
+			}
+			defer func() { _ = file.Close() }()
+			reader = file
+		}
 	}
+
 	answer, err := delivery.Decode(reader)
 	if err != nil {
 		fprintln(stderr, err)

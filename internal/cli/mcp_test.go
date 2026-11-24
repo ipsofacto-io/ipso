@@ -411,3 +411,103 @@ func TestMCPUsage(t *testing.T) {
 		t.Fatalf("code %d: %s", code, stderr.String())
 	}
 }
+
+func TestMCPHealthAndVerifiability(t *testing.T) {
+	root := mcpFixture(t)
+	session := mcpClient(t, root)
+
+	health, failure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls"})
+	if failure != "" {
+		t.Fatalf("decisions.health failed: %s", failure)
+	}
+	if len(health.Decisions) != 1 {
+		t.Fatalf("got %d decisions, want 1", len(health.Decisions))
+	}
+	if health.Decisions[0].Validity.ValidTo != "" {
+		t.Fatalf("expected empty ValidTo for null valid_to, got %q", health.Decisions[0].Validity.ValidTo)
+	}
+	if _, err := time.Parse(time.RFC3339, health.Decisions[0].Validity.ValidFrom); err != nil {
+		t.Fatalf("expected RFC3339 ValidFrom, got %q: %v", health.Decisions[0].Validity.ValidFrom, err)
+	}
+	if health.Decisions[0].Validity.State != "valid" || health.Decisions[0].Compliance.State != "unverified" || health.Decisions[0].Compliance.Note == "" {
+		t.Fatalf("unexpected local health: %+v", health.Decisions[0])
+	}
+	if _, combErr := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls", Query: "tls"}); !strings.Contains(combErr, "ref and query cannot be combined") {
+		t.Fatalf("expected ref+query error, got %q", combErr)
+	}
+	if _, missErr := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "missing-slug"}); !strings.Contains(missErr, "no decision with id or slug") {
+		t.Fatalf("expected missing ref error, got %q", missErr)
+	}
+	scopedHealth, failure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls", Repo: "unmatched/repo"})
+	if failure != "" || len(scopedHealth.Decisions) != 1 || len(scopedHealth.Decisions[0].Compliance.Scopes) != 0 {
+		t.Fatalf("expected ref lookup to return decision with empty matching scopes, got failure=%q out=%+v", failure, scopedHealth)
+	}
+
+	// "unreasonable" must NOT false-positive on the single-word vague qualifier "reasonable".
+	verif, failure := callTool[mcptools.VerifiabilityOutput](t, session, mcptools.ToolVerifiability, mcptools.VerifiabilityInput{
+		Title:     "Reject unreasonable firewall rules",
+		Statement: "Production firewall Terraform plans MUST deny 0.0.0.0/0 egress.",
+	})
+	if failure != "" {
+		t.Fatalf("decisions.verifiability failed: %s", failure)
+	}
+	if verif.Classification != "verifiable" || len(verif.CandidateChecks) == 0 {
+		t.Fatalf("expected verifiable with candidate checks, got %+v", verif)
+	}
+
+	ambig, failure := callTool[mcptools.VerifiabilityOutput](t, session, mcptools.ToolVerifiability, mcptools.VerifiabilityInput{
+		Title:     "Use TLS",
+		Statement: "Services should use TLS where appropriate.",
+	})
+	if failure != "" {
+		t.Fatalf("decisions.verifiability failed: %s", failure)
+	}
+	if ambig.Classification != "ambiguous" {
+		t.Fatalf("expected ambiguous classification, got %+v", ambig)
+	}
+
+	attest, failure := callTool[mcptools.VerifiabilityOutput](t, session, mcptools.ToolVerifiability, mcptools.VerifiabilityInput{
+		Title:     "Hold blameless postmortems",
+		Statement: "Every Kubernetes Sev-1 incident MUST have a blameless postmortem reviewed in a team meeting within 5 business days.",
+	})
+	if failure != "" {
+		t.Fatalf("decisions.verifiability failed: %s", failure)
+	}
+	if attest.Classification != "human_attestation_only" || len(attest.CandidateChecks) != 0 {
+		t.Fatalf("expected human_attestation_only classification, got %+v", attest)
+	}
+
+	// Duplicate slugs with distinct IDs must fail closed on both ref and query paths.
+	dupSlug := strings.Replace(ruleRecord("use-tls-other-id", "Duplicate TLS slug", ruleRepoWide, "", "Second TLS record."), "slug: use-tls-other-id", "slug: use-tls", 1)
+	writeRuleFile(t, root, "docs/decisions/use-tls-second.md", dupSlug)
+	if _, slugFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls"}); !strings.Contains(slugFailure, "more than one decision") {
+		t.Fatalf("expected more than one decision error from decisions.health, got %q", slugFailure)
+	}
+	if _, slugQueryFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"}); !strings.Contains(slugQueryFailure, "duplicate-slug") {
+		t.Fatalf("expected duplicate-slug error from decisions.health query, got %q", slugQueryFailure)
+	}
+	_ = os.Remove(filepath.Join(root, "docs/decisions/use-tls-second.md"))
+
+	// A non-in-force proposed record sharing an ID or slug must not break decisions.health or appear in query listings.
+	rawTLS, err := os.ReadFile(filepath.Join(root, "docs/decisions/use-tls.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposedDup := strings.Replace(string(rawTLS), "status: accepted", "status: proposed", 1)
+	writeRuleFile(t, root, "docs/decisions/use-tls-proposed.md", proposedDup)
+	qOut, propFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"})
+	if propFailure != "" || len(qOut.Decisions) != 1 || qOut.Decisions[0].Validity.Status != "accepted" {
+		t.Fatalf("proposed draft should be omitted from query listing without failing, got failure=%q out=%+v", propFailure, qOut)
+	}
+	refOut, propRefFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls"})
+	if propRefFailure != "" || len(refOut.Decisions) != 1 || refOut.Decisions[0].Validity.Status != "accepted" {
+		t.Fatalf("proposed draft sharing slug should resolve to single in-force record on ref lookup, got failure=%q out=%+v", propRefFailure, refOut)
+	}
+	_ = os.Remove(filepath.Join(root, "docs/decisions/use-tls-proposed.md"))
+
+	// Duplicate in-force decision IDs must fail closed in decisions.health just like decisions.applicable.
+	writeRuleFile(t, root, "docs/decisions/use-tls-dup.md", strings.Replace(string(rawTLS), "slug: use-tls", "slug: use-tls-dup", 1))
+	if _, dupFailure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Query: "tls"}); !strings.Contains(dupFailure, "duplicate-id") {
+		t.Fatalf("expected duplicate-id error from decisions.health, got %q", dupFailure)
+	}
+}

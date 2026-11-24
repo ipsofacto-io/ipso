@@ -25,6 +25,7 @@ type Entry struct {
 	Engine          string             `json:"engine"`
 	Mode            string             `json:"mode"`
 	Target          string             `json:"target"`
+	MaxAgeDays      int                `json:"max_age_days,omitempty"`
 	ValidFrom       string             `json:"valid_from"`
 	ValidTo         *string            `json:"valid_to"`
 	Env             []string           `json:"env"`
@@ -91,6 +92,7 @@ func Assemble(engine Compiler, in Input, artifacts []Artifact) (Entry, []Artifac
 		Engine:          in.Check.Engine,
 		Mode:            mode,
 		Target:          in.Check.Target,
+		MaxAgeDays:      in.Check.MaxAgeDays,
 		ValidFrom:       in.Record.ValidFrom.Format(dateLayout),
 		ValidTo:         dateText(in.Record.ValidTo),
 		Env:             envList(in.Record),

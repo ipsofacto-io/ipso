@@ -98,6 +98,11 @@ func checkNode(c Check) *yaml.Node {
 	field("ref", c.Ref)
 	field("job", c.Job)
 	field("mode", c.Mode)
+	if c.MaxAgeDays > 0 {
+		node.Content = append(node.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "max_age_days"},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: fmt.Sprintf("%d", c.MaxAgeDays)})
+	}
 	return node
 }
 
@@ -115,10 +120,15 @@ func sameButOneCheck(original Document, out string, add Check) error {
 		return errors.New("the rewrite changed the body")
 	}
 	want := checkNode(add)
-	var wantMap map[string]any
-	if err := want.Decode(&wantMap); err != nil {
+	var wantRaw map[string]any
+	if err := want.Decode(&wantRaw); err != nil {
 		return err
 	}
+	normWant, err := jsonRoundTrip(coerce(wantRaw))
+	if err != nil {
+		return err
+	}
+	wantMap, _ := normWant.(map[string]any)
 	before, _ := original.Front["checks"].([]any)
 	after, _ := doc.Front["checks"].([]any)
 	if len(after) != len(before)+1 || !reflect.DeepEqual(after[:len(before)], before) {

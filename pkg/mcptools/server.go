@@ -54,14 +54,16 @@ type tool struct {
 	call        func(context.Context, json.RawMessage) (any, error)
 }
 
-// NewServer returns a server with the four tools. Only decisions.propose has a side effect, and
-// that effect creates a proposal.
+// NewServer returns a server with the six tools in sorted order. Only decisions.propose has a side
+// effect, and that effect creates a proposal.
 func NewServer(version string, backend Backend) *Server {
 	return &Server{version: version, tools: []tool{
 		{ToolEvaluate, "Evaluate checks", "Evaluate a unified diff or a Terraform or OpenTofu plan against the compiled checks with local engines. Returns verdicts and SARIF, and changes nothing.", true, evaluateSchema, bind(backend.Evaluate)},
 		{ToolApplicable, "Applicable decisions", "List the engineering decisions in force for a repository, paths, and an environment, with their checks and state.", true, applicableSchema, bind(backend.Applicable)},
 		{ToolGet, "Get a decision", "Read one engineering decision by id or slug.", true, getSchema, bind(backend.Get)},
+		{ToolHealth, "Decision validity and compliance health", "Answer whether a decision or topic (such as firewall) is still valid in force and respected. Remote MCP and ipso status include stored CI and live drift verdicts; offline local ipso mcp evaluates checkout validity and active waivers only.", true, healthSchema, bind(backend.Health)},
 		{ToolPropose, "Propose a decision", "Record a proposed engineering decision for a person to review. It is not in force until a person approves it.", false, proposeSchema, bind(backend.Propose)},
+		{ToolVerifiability, "Analyze decision verifiability", "Classify whether a draft decision statement is deterministically or semantically verifiable and suggest concrete wording, premises, and checks.", true, verifiabilitySchema, bind(backend.Verifiability)},
 	}}
 }
 

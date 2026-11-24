@@ -154,12 +154,12 @@ func (b *localBackend) evaluatePlan(in mcptools.EvaluateInput, build compiler.Bu
 		return mcptools.EvaluateOutput{}, err
 	}
 	sarifFile := filepath.Join(dir, "results.sarif")
-	args := []string{"check", "plan", planFile, "--sarif", sarifFile}
+	args := []string{planFile, "--sarif", sarifFile}
 	if in.Env != "" {
 		args = append(args, "--env", in.Env)
 	}
 	var stdout, stderr bytes.Buffer
-	code := run(args, &stdout, &stderr, b.d)
+	code := planCmd(b.root, args, &stdout, &stderr, b.d)
 	if code == 2 || stderr.Len() > 0 {
 		return mcptools.EvaluateOutput{}, errors.New(compiler.EscapeControls(strings.TrimSpace(stderr.String())))
 	}
@@ -364,9 +364,247 @@ func toolDecision(item edr.Loaded) mcptools.Decision {
 		if err != nil {
 			mode = "unknown"
 		}
-		decision.Checks = append(decision.Checks, mcptools.Check{Engine: check.Engine, Target: check.Target, Mode: mode})
+		decision.Checks = append(decision.Checks, mcptools.Check{
+			Engine:     check.Engine,
+			Target:     check.Target,
+			Mode:       mode,
+			MaxAgeDays: check.MaxAgeDays,
+		})
 	}
 	return decision
+}
+
+func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcptools.HealthOutput, error) {
+	cfg, _, err := config.Load(b.root)
+	if err != nil {
+		return mcptools.HealthOutput{}, err
+	}
+	loaded, problems, err := edr.Load(b.root, cfg.Decisions)
+	if err != nil {
+		return mcptools.HealthOutput{}, err
+	}
+	now := b.d.now()
+	seenIDs := make(map[string]string, len(loaded))
+	seenSlugs := make(map[string]string, len(loaded))
+	for _, item := range loaded {
+		if !item.Rec.InForce(now) {
+			continue
+		}
+		if prev, dup := seenIDs[item.Rec.ID]; dup {
+			problems = append(problems, fmt.Sprintf("%s: duplicate-id: %s", item.Shown, prev))
+			continue
+		}
+		seenIDs[item.Rec.ID] = item.Shown
+		if prev, dup := seenSlugs[item.Rec.Slug]; dup {
+			problems = append(problems, fmt.Sprintf("%s: duplicate-slug: %s", item.Shown, prev))
+			continue
+		}
+		seenSlugs[item.Rec.Slug] = item.Shown
+	}
+	q := strings.ToLower(strings.TrimSpace(in.Query))
+	if in.Ref != "" && q != "" {
+		return mcptools.HealthOutput{}, errors.New("ref and query cannot be combined")
+	}
+	var selectedRef *edr.Loaded
+	if in.Ref != "" {
+		var allMatches, inForceMatches []edr.Loaded
+		for _, item := range loaded {
+			if item.Rec.ID == in.Ref || item.Rec.Slug == in.Ref {
+				allMatches = append(allMatches, item)
+				if item.Rec.InForce(now) {
+					inForceMatches = append(inForceMatches, item)
+				}
+			}
+		}
+		switch {
+		case len(inForceMatches) > 1 || (len(inForceMatches) == 0 && len(allMatches) > 1):
+			return mcptools.HealthOutput{}, fmt.Errorf("more than one decision with id or slug %q", compiler.EscapeControls(in.Ref))
+		case len(inForceMatches) == 1:
+			selectedRef = &inForceMatches[0]
+		case len(allMatches) == 1:
+			selectedRef = &allMatches[0]
+		}
+	}
+	if len(problems) > 0 {
+		return mcptools.HealthOutput{}, fmt.Errorf("invalid decision files: %s", compiler.EscapeControls(strings.Join(problems, "; ")))
+	}
+	if in.Ref != "" && selectedRef == nil {
+		return mcptools.HealthOutput{}, fmt.Errorf("no decision with id or slug %q", compiler.EscapeControls(in.Ref))
+	}
+	out := mcptools.HealthOutput{Decisions: []mcptools.DecisionHealth{}}
+	for _, item := range loaded {
+		if in.Ref != "" {
+			if item.Shown != selectedRef.Shown {
+				continue
+			}
+		} else {
+			if item.Rec.Status == "proposed" || item.Rec.Status == "rejected" {
+				// Unapproved drafts are omitted from unscoped and query listings; explicit ref lookup still inspects them.
+				continue
+			}
+			if !item.Rec.InForce(now) && seenIDs[item.Rec.ID] != "" {
+				// Shadowed historical copies of an active decision ID do not emit a duplicate row.
+				continue
+			}
+		}
+		if in.Ref == "" && (in.Repo != "" || in.Env != "") && !item.Rec.Applies(in.Repo, nil, in.Env) {
+			continue
+		}
+		sensitive := slices.Contains(item.Rec.Tags, rules.SensitiveTag)
+		title := ""
+		statement := ""
+		if !sensitive {
+			title = item.Doc.Title()
+			text, _ := edr.DecisionText(item.Doc.Body)
+			statement = strings.TrimSpace(text)
+		}
+		if q != "" {
+			haystack := strings.ToLower(item.Rec.Slug + " " + strings.Join(item.Rec.Tags, " "))
+			if !sensitive {
+				haystack += " " + strings.ToLower(title+" "+statement)
+			}
+			if !strings.Contains(haystack, q) {
+				continue
+			}
+		}
+		valState := localValidityState(item.Rec, now)
+		supersededBy := ""
+		// Only in-force records supersede locally; unapproved proposed drafts do not mark an active decision superseded.
+		for _, other := range loaded {
+			if other.Rec.ID == item.Rec.ID || !other.Rec.InForce(now) {
+				continue
+			}
+			if frontSupersedes(other.Doc.Front["supersedes"], item.Rec.Slug, item.Rec.ID) {
+				supersededBy = other.Rec.Slug
+				valState = "superseded"
+				break
+			}
+		}
+		validTo := ""
+		if item.Rec.ValidTo != nil {
+			validTo = item.Rec.ValidTo.UTC().Format(time.RFC3339)
+		}
+		compState := "unverified"
+		waived := false
+		for _, w := range item.Rec.Waivers {
+			if w.InForce(now) {
+				waived = true
+				break
+			}
+		}
+		if waived {
+			compState = "waived"
+		}
+		scopes := []mcptools.ScopeCompliance{}
+		for _, sc := range item.Rec.Scope {
+			if (in.Repo != "" || in.Env != "") && !(edr.Record{Scope: []edr.ScopeItem{sc}}).Applies(in.Repo, nil, in.Env) {
+				continue
+			}
+			if len(sc.Env) == 0 {
+				envLabel := ""
+				if in.Env != "" {
+					envLabel = in.Env
+				}
+				scopes = append(scopes, mcptools.ScopeCompliance{
+					Repo:   sc.Repo,
+					Env:    envLabel,
+					State:  compState,
+					Waived: waived,
+				})
+				continue
+			}
+			for _, env := range sc.Env {
+				if in.Env != "" && env != in.Env {
+					continue
+				}
+				scopes = append(scopes, mcptools.ScopeCompliance{
+					Repo:   sc.Repo,
+					Env:    env,
+					State:  compState,
+					Waived: waived,
+				})
+			}
+		}
+		validFrom := ""
+		if !item.Rec.ValidFrom.IsZero() {
+			validFrom = item.Rec.ValidFrom.UTC().Format(time.RFC3339)
+		}
+		reviewBy := ""
+		if !item.Rec.ReviewBy.IsZero() {
+			reviewBy = item.Rec.ReviewBy.Format("2006-01-02")
+		}
+		out.Decisions = append(out.Decisions, mcptools.DecisionHealth{
+			ID:          item.Rec.ID,
+			Slug:        item.Rec.Slug,
+			Title:       title,
+			Criticality: item.Rec.Criticality,
+			Sensitive:   sensitive,
+			Validity: mcptools.ValidityHealth{
+				State:              valState,
+				Status:             item.Rec.Status,
+				ValidFrom:          validFrom,
+				ValidTo:            validTo,
+				ReviewBy:           reviewBy,
+				SupersededBy:       supersededBy,
+				OpenPremiseReasons: []mcptools.PremiseAlert{},
+			},
+			Compliance: mcptools.ComplianceHealth{
+				State:  compState,
+				Note:   "local checkout only; stored CI/live verdicts, registry supersession, and premise sweep require ipso status or remote MCP",
+				Scopes: scopes,
+			},
+		})
+	}
+	return out, nil
+}
+
+func frontSupersedes(raw any, slug, id string) bool {
+	items, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	for _, entry := range items {
+		s, ok := entry.(string)
+		if ok && (s == slug || s == id) {
+			return true
+		}
+	}
+	return false
+}
+
+func localValidityState(rec edr.Record, now time.Time) string {
+	year, month, day := now.Date()
+	today := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+	switch rec.Status {
+	case "superseded":
+		return "superseded"
+	case "deprecated", "rejected":
+		return "deprecated"
+	case "proposed":
+		return "needs_review"
+	case "needs-review":
+		if rec.ValidTo != nil && !today.Before(*rec.ValidTo) {
+			return "expired"
+		}
+		return "needs_review"
+	}
+	if today.Before(rec.ValidFrom) {
+		return "needs_review"
+	}
+	if !rec.InForce(now) {
+		return "expired"
+	}
+	if !rec.ReviewBy.IsZero() && today.After(rec.ReviewBy) {
+		return "needs_review"
+	}
+	return "valid"
+}
+
+func (b *localBackend) Verifiability(_ context.Context, in mcptools.VerifiabilityInput) (mcptools.VerifiabilityOutput, error) {
+	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Statement) == "" {
+		return mcptools.VerifiabilityOutput{}, errors.New("title and statement are required")
+	}
+	return mcptools.AnalyzeVerifiability(in), nil
 }
 
 func notEvaluated(build compiler.Build, target string) []string {
