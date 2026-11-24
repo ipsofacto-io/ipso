@@ -1,0 +1,119 @@
+package mcptools
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/ipsofacto-io/ipso/pkg/llmcheck"
+)
+
+var (
+	hedgeQualifierPattern   = regexp.MustCompile(`(?i)\b(should try|where appropriate|as needed|when possible|if reasonable|reasonable|try to|generally|prefer to|prefer where sensible|best effort|consider using|ideally)\b`)
+	humanAttestationPattern = regexp.MustCompile(`(?i)\b(postmortem|retrospective|architecture board|committee|manual sign-off|tabletop exercise|team meeting|on-call rotation)\b`)
+)
+
+// AnalyzeVerifiability classifies a draft decision deterministically so local MCP and server
+// fallback paths produce identical classifications, candidate checks, and candidate premises.
+func AnalyzeVerifiability(in VerifiabilityInput) VerifiabilityOutput {
+	combined := in.Title + " " + in.Statement + " " + in.Context
+	lower := strings.ToLower(combined)
+	if match := hedgeQualifierPattern.FindString(combined); match != "" {
+		term := strings.ToLower(match)
+		suggestions := []string{}
+		if sharpened := sharpenStatement(in.Statement, term); sharpened != in.Statement {
+			suggestions = append(suggestions, sharpened)
+		}
+		suggestions = append(suggestions, "Replace discretionary qualifiers with explicit MUST / MUST NOT invariants and named scope exceptions.")
+		return VerifiabilityOutput{
+			Classification:    "ambiguous",
+			Summary:           fmt.Sprintf("Statement contains non-binding hedge language (%q); replace with an explicit invariant and target scope.", term),
+			Suggestions:       suggestions,
+			CandidateChecks:   suggestChecksForText(lower, in.Title, in.Statement),
+			CandidatePremises: suggestPremisesForText(lower),
+			AIGenerated:       false,
+		}
+	}
+	if humanAttestationPattern.MatchString(combined) {
+		return VerifiabilityOutput{
+			Classification:    "human_attestation_only",
+			Summary:           "Decision governs an organizational or human workflow without a machine-readable code or infrastructure artifact; record as accepted without automated checks or attach periodic review.",
+			Suggestions:       []string{"Set a review_by date so periodic human review tracks validity, or rewrite around an inspectable repository artifact."},
+			CandidateChecks:   []CandidateCheck{},
+			CandidatePremises: suggestPremisesForText(lower),
+			AIGenerated:       false,
+		}
+	}
+	return VerifiabilityOutput{
+		Classification:    "verifiable",
+		Summary:           "Statement expresses a concrete technical invariant that can be verified continuously against code changes and live infrastructure snapshots.",
+		Suggestions:       []string{},
+		CandidateChecks:   suggestChecksForText(lower, in.Title, in.Statement),
+		CandidatePremises: suggestPremisesForText(lower),
+		AIGenerated:       false,
+	}
+}
+
+func sharpenStatement(stmt, hedge string) string {
+	idx := strings.Index(strings.ToLower(stmt), hedge)
+	if idx < 0 {
+		return stmt
+	}
+	return strings.TrimSpace(stmt[:idx] + "must" + stmt[idx+len(hedge):])
+}
+
+func suggestChecksForText(lower, title, statement string) []CandidateCheck {
+	var out []CandidateCheck
+	switch {
+	case strings.Contains(lower, "firewall") || strings.Contains(lower, "egress") || strings.Contains(lower, "cidr") || strings.Contains(lower, "0.0.0.0/0") || strings.Contains(lower, "security group") || strings.Contains(lower, "terraform") || strings.Contains(lower, "tofu") || strings.Contains(lower, "s3") || strings.Contains(lower, "ebs"):
+		out = append(out, CandidateCheck{
+			Engine:     "opa",
+			Target:     "terraform-plan",
+			Mode:       "block",
+			MaxAgeDays: 7,
+			Rationale:  "Deterministic Rego check over OpenTofu/Terraform plan and refresh-only live state.",
+		})
+	case strings.Contains(lower, "kubernetes") || strings.Contains(lower, "pod") || strings.Contains(lower, "ingress") || strings.Contains(lower, "networkpolicy") || strings.Contains(lower, "namespace"):
+		out = append(out, CandidateCheck{
+			Engine:     "kyverno",
+			Target:     "kubernetes-manifest",
+			Mode:       "block",
+			MaxAgeDays: 7,
+			Rationale:  "Kubernetes manifest policy check over CI manifests and live cluster exports.",
+		})
+	default:
+		out = append(out, CandidateCheck{
+			Engine:     "semgrep",
+			Target:     "diff",
+			Mode:       "warn",
+			MaxAgeDays: 14,
+			Rationale:  "Static analysis check over repository changes.",
+		})
+	}
+	specBytes, _ := llmcheck.MarshalCanonical(llmcheck.Spec{
+		Version:  llmcheck.SpecVersion,
+		Target:   llmcheck.TargetDiff,
+		Rubric:   strings.TrimSpace(title + ": " + statement),
+		Fixtures: []llmcheck.Fixture{},
+	})
+	out = append(out, CandidateCheck{
+		Engine:     "llm",
+		Target:     "diff",
+		Mode:       "warn",
+		MaxAgeDays: 14,
+		LLMSpec:    string(specBytes),
+		Rationale:  "Grounded LLM check for semantic invariants across diffs; requires approved allow/deny fixtures before mode: block.",
+	})
+	return out
+}
+
+func suggestPremisesForText(lower string) []CandidatePremise {
+	if strings.Contains(lower, "cost") || strings.Contains(lower, "latency") || strings.Contains(lower, "throughput") || strings.Contains(lower, "vendor") {
+		return []CandidatePremise{{
+			ID:        "baseline-assumption",
+			Statement: "Re-verify the operational or vendor assumption behind this decision periodically.",
+			Every:     90,
+		}}
+	}
+	return []CandidatePremise{}
+}

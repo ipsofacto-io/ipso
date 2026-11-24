@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -395,6 +394,10 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 	if len(problems) > 0 {
 		return mcptools.HealthOutput{}, fmt.Errorf("invalid decision files: %s", compiler.EscapeControls(strings.Join(problems, "; ")))
 	}
+	q := strings.ToLower(strings.TrimSpace(in.Query))
+	if in.Ref != "" && q != "" {
+		return mcptools.HealthOutput{}, errors.New("ref and query cannot be combined")
+	}
 	if in.Ref != "" {
 		matches := 0
 		for _, item := range loaded {
@@ -402,18 +405,20 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 				matches++
 			}
 		}
+		if matches == 0 {
+			return mcptools.HealthOutput{}, fmt.Errorf("no decision with id or slug %q", compiler.EscapeControls(in.Ref))
+		}
 		if matches > 1 {
 			return mcptools.HealthOutput{}, fmt.Errorf("more than one decision with id or slug %q", compiler.EscapeControls(in.Ref))
 		}
 	}
 	now := b.d.now()
-	q := strings.ToLower(strings.TrimSpace(in.Query))
 	out := mcptools.HealthOutput{Decisions: []mcptools.DecisionHealth{}}
 	for _, item := range loaded {
 		if in.Ref != "" && item.Rec.ID != in.Ref && item.Rec.Slug != in.Ref {
 			continue
 		}
-		if (in.Repo != "" || in.Env != "") && !item.Rec.Applies(in.Repo, nil, in.Env) {
+		if in.Ref == "" && (in.Repo != "" || in.Env != "") && !item.Rec.Applies(in.Repo, nil, in.Env) {
 			continue
 		}
 		sensitive := slices.Contains(item.Rec.Tags, rules.SensitiveTag)
@@ -448,7 +453,7 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 		}
 		validTo := ""
 		if item.Rec.ValidTo != nil {
-			validTo = item.Rec.ValidTo.Format("2006-01-02")
+			validTo = item.Rec.ValidTo.UTC().Format(time.RFC3339)
 		}
 		compState := "unverified"
 		waived := false
@@ -463,15 +468,26 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 		}
 		scopes := []mcptools.ScopeCompliance{}
 		for _, sc := range item.Rec.Scope {
+			if (in.Repo != "" || in.Env != "") && !(edr.Record{Scope: []edr.ScopeItem{sc}}).Applies(in.Repo, nil, in.Env) {
+				continue
+			}
 			if len(sc.Env) == 0 {
+				envLabel := ""
+				if in.Env != "" {
+					envLabel = in.Env
+				}
 				scopes = append(scopes, mcptools.ScopeCompliance{
 					Repo:   sc.Repo,
+					Env:    envLabel,
 					State:  compState,
 					Waived: waived,
 				})
 				continue
 			}
 			for _, env := range sc.Env {
+				if in.Env != "" && env != in.Env {
+					continue
+				}
 				scopes = append(scopes, mcptools.ScopeCompliance{
 					Repo:   sc.Repo,
 					Env:    env,
@@ -482,7 +498,7 @@ func (b *localBackend) Health(_ context.Context, in mcptools.HealthInput) (mcpto
 		}
 		validFrom := ""
 		if !item.Rec.ValidFrom.IsZero() {
-			validFrom = item.Rec.ValidFrom.Format("2006-01-02")
+			validFrom = item.Rec.ValidFrom.UTC().Format(time.RFC3339)
 		}
 		reviewBy := ""
 		if !item.Rec.ReviewBy.IsZero() {
@@ -536,15 +552,16 @@ func localValidityState(rec edr.Record, now time.Time) string {
 	case "needs-review", "proposed":
 		return "needs_review"
 	}
-	year, month, day := now.Date()
+	nowUTC := now.UTC()
+	year, month, day := nowUTC.Date()
 	today := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	if today.Before(rec.ValidFrom) {
 		return "needs_review"
 	}
-	if !rec.InForce(now) {
+	if !rec.InForce(nowUTC) {
 		return "expired"
 	}
-	if !rec.ReviewBy.IsZero() && today.After(rec.ReviewBy) {
+	if !rec.ReviewBy.IsZero() && nowUTC.After(rec.ReviewBy.UTC().Add(24*time.Hour)) {
 		return "needs_review"
 	}
 	return "valid"
@@ -554,87 +571,7 @@ func (b *localBackend) Verifiability(_ context.Context, in mcptools.Verifiabilit
 	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Statement) == "" {
 		return mcptools.VerifiabilityOutput{}, errors.New("title and statement are required")
 	}
-	return localVerifiability(in), nil
-}
-
-var (
-	vagueQualifierPattern   = regexp.MustCompile(`(?i)\b(where appropriate|when possible|try to|reasonable|best effort|prefer where sensible|as needed)\b`)
-	humanAttestationPattern = regexp.MustCompile(`(?i)\b(postmortem|retrospective|architecture board|committee|manual sign-off|tabletop exercise|team meeting)\b`)
-)
-
-func localVerifiability(in mcptools.VerifiabilityInput) mcptools.VerifiabilityOutput {
-	combined := in.Title + " " + in.Statement + " " + in.Context
-	lower := strings.ToLower(combined)
-	if match := vagueQualifierPattern.FindString(combined); match != "" {
-		term := strings.ToLower(match)
-		return mcptools.VerifiabilityOutput{
-			Classification: "ambiguous",
-			Summary:        fmt.Sprintf("Statement contains non-deterministic qualifier %q; replace with an explicit scope, resource attribute, or measurable invariant.", term),
-			Suggestions: []string{
-				"Replace discretionary qualifiers with explicit MUST / MUST NOT invariants and named scope exceptions.",
-				"Add a concrete check (OPA, Semgrep, Kyverno, or engine: llm with allow/deny fixtures) once the invariant is specific.",
-			},
-			CandidateChecks:   []mcptools.CandidateCheck{},
-			CandidatePremises: []mcptools.CandidatePremise{},
-			AIGenerated:       false,
-		}
-	}
-	if humanAttestationPattern.MatchString(combined) {
-		return mcptools.VerifiabilityOutput{
-			Classification: "human_attestation_only",
-			Summary:        "Statement governs a human or organizational ceremony rather than an inspectable code or infrastructure artifact.",
-			Suggestions: []string{
-				"Record the decision with status: accepted and checks: [] if human attestation is intended, or rewrite around an inspectable repository artifact.",
-			},
-			CandidateChecks:   []mcptools.CandidateCheck{},
-			CandidatePremises: []mcptools.CandidatePremise{},
-			AIGenerated:       false,
-		}
-	}
-	checks := []mcptools.CandidateCheck{}
-	switch {
-	case strings.Contains(lower, "terraform") || strings.Contains(lower, "tofu") || strings.Contains(lower, "firewall") || strings.Contains(lower, "egress") || strings.Contains(lower, "s3") || strings.Contains(lower, "ebs"):
-		checks = append(checks,
-			mcptools.CandidateCheck{
-				Engine:     "opa",
-				Target:     "terraform-plan",
-				Mode:       "block",
-				MaxAgeDays: 7,
-				Rationale:  "Infrastructure resources and network rules can be checked deterministically on Terraform/OpenTofu plans and scheduled refresh-only snapshots.",
-			},
-			mcptools.CandidateCheck{
-				Engine:     "llm",
-				Target:     "json-snapshot",
-				Mode:       "warn",
-				MaxAgeDays: 7,
-				Rationale:  "Exported firewall or cloud policy snapshots can also be evaluated with a grounded engine: llm rubric and verbatim quote verification.",
-			},
-		)
-	case strings.Contains(lower, "kubernetes") || strings.Contains(lower, "pod") || strings.Contains(lower, "ingress") || strings.Contains(lower, "namespace"):
-		checks = append(checks, mcptools.CandidateCheck{
-			Engine:     "kyverno",
-			Target:     "kubernetes",
-			Mode:       "block",
-			MaxAgeDays: 7,
-			Rationale:  "Kubernetes manifests and live cluster exports can be verified with Kyverno policies.",
-		})
-	default:
-		checks = append(checks, mcptools.CandidateCheck{
-			Engine:     "llm",
-			Target:     "diff",
-			Mode:       "warn",
-			MaxAgeDays: 14,
-			Rationale:  "Architectural prose rules without a structural AST pattern can use engine: llm with approved allow/deny fixtures and verbatim quote grounding.",
-		})
-	}
-	return mcptools.VerifiabilityOutput{
-		Classification:    "verifiable",
-		Summary:           "Statement expresses an enforceable invariant that can be paired with automated checks.",
-		Suggestions:       []string{},
-		CandidateChecks:   checks,
-		CandidatePremises: []mcptools.CandidatePremise{},
-		AIGenerated:       false,
-	}
+	return mcptools.AnalyzeVerifiability(in), nil
 }
 
 func notEvaluated(build compiler.Build, target string) []string {

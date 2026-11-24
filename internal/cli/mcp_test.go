@@ -426,8 +426,21 @@ func TestMCPHealthAndVerifiability(t *testing.T) {
 	if health.Decisions[0].Validity.ValidTo != "" {
 		t.Fatalf("expected empty ValidTo for null valid_to, got %q", health.Decisions[0].Validity.ValidTo)
 	}
+	if _, err := time.Parse(time.RFC3339, health.Decisions[0].Validity.ValidFrom); err != nil {
+		t.Fatalf("expected RFC3339 ValidFrom, got %q: %v", health.Decisions[0].Validity.ValidFrom, err)
+	}
 	if health.Decisions[0].Validity.State != "valid" || health.Decisions[0].Compliance.State != "unverified" || health.Decisions[0].Compliance.Note == "" {
 		t.Fatalf("unexpected local health: %+v", health.Decisions[0])
+	}
+	if _, combErr := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls", Query: "tls"}); !strings.Contains(combErr, "ref and query cannot be combined") {
+		t.Fatalf("expected ref+query error, got %q", combErr)
+	}
+	if _, missErr := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "missing-slug"}); !strings.Contains(missErr, "no decision with id or slug") {
+		t.Fatalf("expected missing ref error, got %q", missErr)
+	}
+	scopedHealth, failure := callTool[mcptools.HealthOutput](t, session, mcptools.ToolHealth, mcptools.HealthInput{Ref: "use-tls", Repo: "unmatched/repo"})
+	if failure != "" || len(scopedHealth.Decisions) != 1 || len(scopedHealth.Decisions[0].Compliance.Scopes) != 0 {
+		t.Fatalf("expected ref lookup to return decision with empty matching scopes, got failure=%q out=%+v", failure, scopedHealth)
 	}
 
 	// "unreasonable" must NOT false-positive on the single-word vague qualifier "reasonable".
