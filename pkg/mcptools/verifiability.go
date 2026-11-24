@@ -21,23 +21,21 @@ var (
 func AnalyzeVerifiability(in VerifiabilityInput) VerifiabilityOutput {
 	combined := in.Title + " " + in.Statement + " " + in.Context
 	lower := strings.ToLower(combined)
-	if match := hedgeQualifierPattern.FindString(combined); match != "" {
+	if match := hedgeQualifierPattern.FindString(in.Statement); match != "" {
 		term := strings.ToLower(match)
-		suggestions := []string{}
-		if sharpened := sharpenStatement(in.Statement, term); sharpened != in.Statement {
-			suggestions = append(suggestions, sharpened)
-		}
-		suggestions = append(suggestions, "Replace discretionary qualifiers with explicit MUST / MUST NOT invariants and named scope exceptions.")
 		return VerifiabilityOutput{
-			Classification:    "ambiguous",
-			Summary:           fmt.Sprintf("Statement contains non-binding hedge language (%q); replace with an explicit invariant and target scope.", term),
-			Suggestions:       suggestions,
+			Classification: "ambiguous",
+			Summary:        fmt.Sprintf("Statement contains non-binding hedge language (%q); replace with an explicit invariant and target scope.", term),
+			Suggestions: []string{
+				fmt.Sprintf("Remove %q from the statement and state an explicit MUST or MUST NOT invariant with concrete scope.", term),
+				"Name any permitted exceptions as explicit scope exclusions or time-bounded waivers.",
+			},
 			CandidateChecks:   suggestChecksForText(lower, in.Title, in.Statement),
 			CandidatePremises: suggestPremisesForText(lower),
 			AIGenerated:       false,
 		}
 	}
-	if humanAttestationPattern.MatchString(combined) {
+	if humanAttestationPattern.MatchString(in.Statement) {
 		return VerifiabilityOutput{
 			Classification:    "human_attestation_only",
 			Summary:           "Decision governs an organizational or human workflow without a machine-readable code or infrastructure artifact; record as accepted without automated checks or attach periodic review.",
@@ -55,14 +53,6 @@ func AnalyzeVerifiability(in VerifiabilityInput) VerifiabilityOutput {
 		CandidatePremises: suggestPremisesForText(lower),
 		AIGenerated:       false,
 	}
-}
-
-func sharpenStatement(stmt, hedge string) string {
-	idx := strings.Index(strings.ToLower(stmt), hedge)
-	if idx < 0 {
-		return stmt
-	}
-	return strings.TrimSpace(stmt[:idx] + "must" + stmt[idx+len(hedge):])
 }
 
 func suggestChecksForText(lower, title, statement string) []CandidateCheck {

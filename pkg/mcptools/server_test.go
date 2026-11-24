@@ -259,7 +259,7 @@ func TestServeStdioAnswersEachLine(t *testing.T) {
 
 func TestAnalyzeVerifiabilityEmitsValidLLMSpec(t *testing.T) {
 	res := AnalyzeVerifiability(VerifiabilityInput{
-		Title:     "Reject unreasonable firewall egress",
+		Title:     "Consider using strict egress rules",
 		Statement: "Production Terraform plans MUST deny 0.0.0.0/0 egress.",
 	})
 	if res.Classification != "verifiable" {

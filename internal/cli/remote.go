@@ -285,8 +285,25 @@ func draftCmd(args []string, stdout, stderr io.Writer, d deps) int {
 		return 2
 	}
 
+	verifIn := mcptools.VerifiabilityInput{
+		Title:     title,
+		Statement: statement,
+		Context:   contextText,
+		Repo:      repo,
+		Env:       env,
+	}
 	sess, err := auth.Resolve(d.authStore, serverFlag)
 	if err != nil {
+		if analyzeOnly && serverFlag == "" {
+			verif := mcptools.AnalyzeVerifiability(verifIn)
+			if asJSON {
+				raw, _ := json.MarshalIndent(verif, "", "  ")
+				fprintf(stdout, "%s\n", raw)
+				return 0
+			}
+			printVerifiability(stdout, verif)
+			return 0
+		}
 		fprintln(stderr, err)
 		return 1
 	}
@@ -295,13 +312,7 @@ func draftCmd(args []string, stdout, stderr io.Writer, d deps) int {
 	defer cancel()
 
 	var verif mcptools.VerifiabilityOutput
-	if err := client.PostJSON(ctx, "/v1/verifiability", mcptools.VerifiabilityInput{
-		Title:     title,
-		Statement: statement,
-		Context:   contextText,
-		Repo:      repo,
-		Env:       env,
-	}, &verif); err != nil {
+	if err := client.PostJSON(ctx, "/v1/verifiability", verifIn, &verif); err != nil {
 		fprintln(stderr, err)
 		return 1
 	}
