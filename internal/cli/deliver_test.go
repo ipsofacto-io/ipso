@@ -108,6 +108,53 @@ func TestDeliverThenCompileBuildsTheStoredRego(t *testing.T) {
 	}
 }
 
+func TestDeliverTemplatesThenCompile(t *testing.T) {
+	root := t.TempDir()
+	withDir(t, root)
+	writeRepoFile(t, root, "docs/decisions/no-float.md", compileRecord(idA, "no-float", "accepted", "blocking", "2026-01-15", "", ""))
+	plan := delivery.Item{ID: deliveredCheck, DecisionID: decisionUUID, EDRID: ptrTo(idA), DecisionVersion: 1, VersionInForce: 1, Engine: "opa", Target: "terraform-plan", Ref: ptrTo("ipso:aws/ebs-encrypted")}
+	slog := delivery.Item{ID: otherCheck, DecisionID: decisionUUID, EDRID: ptrTo(idA), DecisionVersion: 1, VersionInForce: 1, Engine: "semgrep", Ref: ptrTo("ipso:go/use-slog")}
+
+	stdout, stderr, code := runDeliver(t, "", answerFile(t, plan, slog))
+	if code != 0 || !strings.Contains(stdout, "added check "+deliveredCheck+" (ipso:aws/ebs-encrypted)") || stderr != "" {
+		t.Fatalf("deliver = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".ipso", "checks")); err == nil {
+		t.Fatal("a template check wrote a file under .ipso/checks")
+	}
+
+	out, errOut, code := compileAt(t, deliverNow, builtin.Registry())
+	if code != 0 {
+		t.Fatalf("compile = %d\n%s\n%s", code, out, errOut)
+	}
+	build, err := compiler.LoadBuild(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(build.Entries) != 2 {
+		t.Fatalf("manifest = %+v", build.Entries)
+	}
+	if e := build.Entries[0]; e.Engine != "opa" || e.Target != "terraform-plan" || e.CheckIndex != 0 {
+		t.Fatalf("plan entry = %+v", e)
+	}
+	if e := build.Entries[1]; e.Engine != "semgrep" || e.CheckIndex != 1 {
+		t.Fatalf("semgrep entry = %+v", e)
+	}
+	if got := readBuild(t, root, idA+"/0/policy.rego"); !strings.Contains(got, "package ipso.templates.aws.ebs_encrypted") {
+		t.Fatalf("the built Rego is not the plan template:\n%s", got)
+	}
+	if got := readBuild(t, root, idA+"/1/semgrep.yaml"); !strings.Contains(got, "go.use-slog") {
+		t.Fatalf("the built Semgrep config is not the template:\n%s", got)
+	}
+
+	stdout, _, code = runDeliver(t, "", answerFile(t, plan, slog))
+	if code != 0 || strings.Count(stdout, "already delivered") != 2 {
+		t.Fatalf("second deliver = %d, %q", code, stdout)
+	}
+}
+
+func ptrTo(s string) *string { return &s }
+
 func TestDeliverReadsStdin(t *testing.T) {
 	root := t.TempDir()
 	withDir(t, root)

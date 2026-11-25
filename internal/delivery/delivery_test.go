@@ -352,6 +352,105 @@ func TestDeliverRefusesAndWritesNothing(t *testing.T) {
 	}
 }
 
+func planTemplate(id string, edrID *string) Item {
+	return Item{ID: id, DecisionID: decUUID, EDRID: edrID, DecisionVersion: 1, VersionInForce: 1, Engine: "opa", Target: "terraform-plan", Ref: ptr("ipso:aws/ebs-encrypted")}
+}
+
+func semgrepTemplate(id string, edrID *string) Item {
+	return Item{ID: id, DecisionID: decUUID, EDRID: edrID, DecisionVersion: 1, VersionInForce: 1, Engine: "semgrep", Ref: ptr("ipso:go/use-slog")}
+}
+
+func TestDeliverTemplatesWriteOnlyTheEntry(t *testing.T) {
+	root := repoWith(t, map[string]string{decisionFile: record(edrA, "no-float", "accepted")})
+	results, problems := deliver(t, root, planTemplate(checkA, ptr(edrA)), semgrepTemplate(checkB, ptr(edrA)))
+	if len(problems) > 0 {
+		t.Fatal(problems)
+	}
+	if len(results) != 2 || results[0].Status != Added || results[1].Status != Added || results[0].Rego != "ipso:aws/ebs-encrypted" {
+		t.Fatalf("results = %+v", results)
+	}
+	if exists(root, ".ipso") {
+		t.Fatal("a template check wrote a file")
+	}
+	doc, err := edr.ReadFile(filepath.Join(root, decisionFile))
+	if err != nil || len(edr.Validate(doc)) > 0 {
+		t.Fatalf("the decision file is not valid: %v %v", err, edr.Validate(doc))
+	}
+	rec, err := edr.RecordFrom(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []edr.Check{
+		{Engine: "opa", Target: "terraform-plan", Ref: "ipso:aws/ebs-encrypted"},
+		{Engine: "semgrep", Ref: "ipso:go/use-slog"},
+	}
+	if len(rec.Checks) != 2 || rec.Checks[0] != want[0] || rec.Checks[1] != want[1] {
+		t.Fatalf("checks = %+v", rec.Checks)
+	}
+
+	before := read(t, root, decisionFile)
+	results, problems = deliver(t, root, planTemplate(checkA, ptr(edrA)), semgrepTemplate(checkB, ptr(edrA)))
+	if len(problems) > 0 || results[0].Status != Present || results[1].Status != Present {
+		t.Fatalf("second run: %+v %v", results, problems)
+	}
+	if read(t, root, decisionFile) != before {
+		t.Fatal("the decision file changed on the second run")
+	}
+}
+
+func TestDeliverTemplateAlreadyWrittenByHand(t *testing.T) {
+	text := strings.Replace(record(edrA, "no-float", "accepted"), "checks: []", "checks:\n  - engine: semgrep\n    ref: ipso:go/use-slog", 1)
+	root := repoWith(t, map[string]string{decisionFile: text})
+	results, problems := deliver(t, root, semgrepTemplate(checkA, ptr(edrA)))
+	if len(problems) > 0 || results[0].Status != Present || read(t, root, decisionFile) != text {
+		t.Fatalf("%+v %v", results, problems)
+	}
+}
+
+func TestDeliverHoldsATemplateForAnotherVersion(t *testing.T) {
+	root := repoWith(t, map[string]string{decisionFile: record(edrA, "no-float", "accepted")})
+	before := read(t, root, decisionFile)
+	held := semgrepTemplate(checkA, ptr(edrA))
+	held.Ref = nil
+	held.VersionInForce = 2
+	results, problems := deliver(t, root, held)
+	if len(problems) > 0 || results[0].Status != Held || read(t, root, decisionFile) != before {
+		t.Fatalf("%+v %v", results, problems)
+	}
+}
+
+func TestDecodeRefusesTemplates(t *testing.T) {
+	encode := func(i Item) string {
+		raw, err := json.Marshal(Answer{AcceptedChecks: []Item{i}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	for name, test := range map[string]struct {
+		item Item
+		want string
+	}{
+		"an id of no template":             {func() Item { i := planTemplate(checkA, ptr(edrA)); i.Ref = ptr("ipso:aws/unknown"); return i }(), "template-unknown"},
+		"a ref that is a path":             {func() Item { i := planTemplate(checkA, ptr(edrA)); i.Ref = ptr(".ipso/checks/x.rego"); return i }(), "template-unknown"},
+		"a plan template as semgrep":       {func() Item { i := planTemplate(checkA, ptr(edrA)); i.Engine = "semgrep"; i.Target = ""; return i }(), "not engine"},
+		"a plan template with no target":   {func() Item { i := planTemplate(checkA, ptr(edrA)); i.Target = ""; return i }(), "not engine"},
+		"a semgrep template with a target": {func() Item { i := semgrepTemplate(checkA, ptr(edrA)); i.Target = "diff"; return i }(), "not engine"},
+		"a semgrep check with no ref":      {func() Item { i := semgrepTemplate(checkA, ptr(edrA)); i.Ref = nil; return i }(), "carries a template ref"},
+		"a template that carries rego": {func() Item {
+			i := planTemplate(checkA, ptr(edrA))
+			i.Rego, i.RegoSHA256 = ptr(noFloat), ptr(strings.Repeat("a", 64))
+			return i
+		}(), "no rego"},
+		"a template that carries an llm spec": {func() Item { i := semgrepTemplate(checkA, ptr(edrA)); i.LLMSpec = ptr("{}"); return i }(), "no rego"},
+	} {
+		_, err := Decode(strings.NewReader(encode(test.item)))
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s: err = %v, want one with %q", name, err, test.want)
+		}
+	}
+}
+
 func TestDecode(t *testing.T) {
 	good := item(checkA, ptr(edrA), noFloat)
 	encode := func(items ...Item) string {

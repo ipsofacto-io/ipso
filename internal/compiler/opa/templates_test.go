@@ -27,7 +27,7 @@ func TestTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := make([]docRow, 0, len(ids))
+	rows := make([]Template, 0, len(ids))
 	for _, id := range ids {
 		t.Run(id, func(t *testing.T) {
 			src, ok := lookup(id)
@@ -44,7 +44,10 @@ func TestTemplates(t *testing.T) {
 			if err := compileModules(map[string]*ast.Module{id + ".rego": mod, libName: libMod}); err != nil {
 				t.Fatal(err)
 			}
-			row := metadata(t, id, mod)
+			row, err := readTemplate(id, src)
+			if err != nil {
+				t.Fatal(err)
+			}
 			rows = append(rows, row)
 			evaluateCorpus(t, id, string(src), string(libSource()))
 		})
@@ -69,39 +72,19 @@ func TestSemanticCases(t *testing.T) {
 	}
 }
 
-func metadata(t *testing.T, id string, mod *ast.Module) docRow {
-	t.Helper()
-	if len(mod.Annotations) == 0 {
-		t.Fatal("missing metadata")
+func TestTemplatesCatalog(t *testing.T) {
+	got := Templates()
+	if len(got) != len(wantTemplateIDs) {
+		t.Fatalf("catalog has %d templates, want %d", len(got), len(wantTemplateIDs))
 	}
-	ann := mod.Annotations[0]
-	provider, _ := ann.Custom["provider"].(string)
-	resources := stringList(ann.Custom["resources"])
-	if ann.Title == "" || ann.Description == "" || provider == "" || len(resources) == 0 {
-		t.Fatalf("metadata title %q description %q provider %q resources %#v", ann.Title, ann.Description, provider, ann.Custom["resources"])
-	}
-	if provider != strings.Split(id, "/")[0] {
-		t.Fatalf("provider %s", provider)
-	}
-	return docRow{id: id, title: ann.Title, resources: resources}
-}
-
-func stringList(value any) []string {
-	switch items := value.(type) {
-	case []any:
-		out := make([]string, 0, len(items))
-		for _, item := range items {
-			text, ok := item.(string)
-			if !ok {
-				return nil
-			}
-			out = append(out, text)
+	for i, entry := range got {
+		if entry.ID != wantTemplateIDs[i] || entry.Title == "" || len(entry.Resources) == 0 {
+			t.Fatalf("entry %d %#v", i, entry)
 		}
-		return out
-	case []string:
-		return append([]string(nil), items...)
-	default:
-		return nil
+	}
+	got[0].Resources[0] = "changed"
+	if Templates()[0].Resources[0] == "changed" {
+		t.Fatal("Templates shares its slices with the caller")
 	}
 }
 
@@ -303,15 +286,9 @@ func noOrphanCorpus(t *testing.T, ids []string) {
 	}
 }
 
-type docRow struct {
-	id        string
-	title     string
-	resources []string
-}
-
-func checkDoc(t *testing.T, rows []docRow) {
+func checkDoc(t *testing.T, rows []Template) {
 	t.Helper()
-	sort.Slice(rows, func(i, j int) bool { return rows[i].id < rows[j].id })
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 	got := renderDoc(rows)
 	path := filepath.Join("..", "..", "..", "docs", "templates.md")
 	if compilertest.Updating() {
@@ -332,7 +309,7 @@ func checkDoc(t *testing.T, rows []docRow) {
 	}
 }
 
-func renderDoc(rows []docRow) string {
+func renderDoc(rows []Template) string {
 	var b strings.Builder
 	b.WriteString("# Terraform plan templates\n\n")
 	b.WriteString("A check with `engine: opa` and `ref: ipso:<id>` compiles one of these templates. The check `target` must be `terraform-plan`. Each template reads a Terraform or OpenTofu plan and denies with an object that carries `msg` and `address`.\n\n")
@@ -340,7 +317,7 @@ func renderDoc(rows []docRow) string {
 	b.WriteString("| id | title | resources |\n")
 	b.WriteString("| --- | --- | --- |\n")
 	for _, row := range rows {
-		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", row.id, row.title, strings.Join(row.resources, ", "))
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", row.ID, row.Title, strings.Join(row.Resources, ", "))
 	}
 	return b.String()
 }
