@@ -16,7 +16,7 @@ import (
 
 const deliverUsage = "usage: ipso deliver <accepted-checks.json|-> | --repo <owner/name> [--server url]"
 
-// deliverCmd brings the accepted checks of a control plane into this repository (ADR-0120, ADR-0158, ADR-0160).
+// deliverCmd brings the accepted checks of a control plane into this repository (ADR-0120, ADR-0158, ADR-0160, ADR-0165).
 // Given a file path or "-", it opens no network connection. Given --repo <owner/name>, it fetches
 // GET /v1/accepted-checks?repo=<owner/name> using the active CLI session or IPSO_TOKEN.
 func deliverCmd(root string, args []string, stdin io.Reader, stdout, stderr io.Writer, d deps) int {

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/ipsofacto-io/ipso/internal/compiler/compilertest"
 )
 
@@ -19,7 +17,7 @@ func TestTemplates(t *testing.T) {
 	if strings.Join(ids, "\n") != strings.Join(wantTemplateIDs, "\n") {
 		t.Fatalf("templates\n%s\nwant\n%s", strings.Join(ids, "\n"), strings.Join(wantTemplateIDs, "\n"))
 	}
-	rows := make([]docRow, 0, len(ids))
+	rows := make([]Template, 0, len(ids))
 	required := map[string]struct{}{}
 	for _, id := range ids {
 		src, ok := lookup(id)
@@ -29,14 +27,14 @@ func TestTemplates(t *testing.T) {
 		if _, err := compileConfig(src, "block"); err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
-		row, err := readDocRow(id, src)
+		row, err := readTemplate(id, src)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
 		rows = append(rows, row)
 		ruleID := strings.ReplaceAll(id, "/", ".")
 		dir, name, _ := strings.Cut(id, "/")
-		for _, language := range row.languages {
+		for _, language := range row.Languages {
 			ext, known := languageExt[language]
 			if !known {
 				t.Fatalf("%s: no fixture extension for %s", id, language)
@@ -57,22 +55,20 @@ func TestTemplates(t *testing.T) {
 	checkDoc(t, rows)
 }
 
-func readDocRow(id string, src []byte) (docRow, error) {
-	var file struct {
-		Rules []struct {
-			Languages []string `yaml:"languages"`
-			Metadata  struct {
-				Title string `yaml:"title"`
-			} `yaml:"metadata"`
-		} `yaml:"rules"`
+func TestTemplatesCatalog(t *testing.T) {
+	got := Templates()
+	if len(got) != len(wantTemplateIDs) {
+		t.Fatalf("catalog has %d templates, want %d", len(got), len(wantTemplateIDs))
 	}
-	if err := yaml.Unmarshal(src, &file); err != nil {
-		return docRow{}, err
+	for i, entry := range got {
+		if entry.ID != wantTemplateIDs[i] || entry.Title == "" || len(entry.Languages) == 0 {
+			t.Fatalf("entry %d %#v", i, entry)
+		}
 	}
-	if len(file.Rules) != 1 || file.Rules[0].Metadata.Title == "" || len(file.Rules[0].Languages) == 0 {
-		return docRow{}, fmt.Errorf("template %s has no title or languages", id)
+	got[0].Languages[0] = "changed"
+	if Templates()[0].Languages[0] == "changed" {
+		t.Fatal("Templates shares its slices with the caller")
 	}
-	return docRow{id: id, title: file.Rules[0].Metadata.Title, languages: file.Rules[0].Languages}, nil
 }
 
 func checkOrphans(t *testing.T, required map[string]struct{}) {
@@ -95,15 +91,9 @@ func checkOrphans(t *testing.T, required map[string]struct{}) {
 	}
 }
 
-type docRow struct {
-	id        string
-	title     string
-	languages []string
-}
-
-func checkDoc(t *testing.T, rows []docRow) {
+func checkDoc(t *testing.T, rows []Template) {
 	t.Helper()
-	sort.Slice(rows, func(i, j int) bool { return rows[i].id < rows[j].id })
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 	got := renderDoc(rows)
 	path := filepath.Join("..", "..", "..", "docs", "semgrep-templates.md")
 	if compilertest.Updating() {
@@ -121,14 +111,14 @@ func checkDoc(t *testing.T, rows []docRow) {
 	}
 }
 
-func renderDoc(rows []docRow) string {
+func renderDoc(rows []Template) string {
 	var b strings.Builder
 	b.WriteString("# Semgrep templates\n\n")
 	b.WriteString("A check with `engine: semgrep` and `ref: ipso:<id>` compiles one of these templates. Severity follows the check mode. Each template is one Semgrep rule.\n\n")
 	b.WriteString("| id | title | languages |\n")
 	b.WriteString("| --- | --- | --- |\n")
 	for _, row := range rows {
-		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", row.id, row.title, strings.Join(row.languages, ", "))
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", row.ID, row.Title, strings.Join(row.Languages, ", "))
 	}
 	return b.String()
 }

@@ -1,7 +1,8 @@
-// Package delivery brings the accepted checks of a control plane into a repository (ADR-0120, ADR-0158).
-// For each check it writes the Rego (.rego) or LLM check specification (.llm.json) under .ipso/checks,
-// which the agent hooks protect, and adds one entry to the checks of the decision file that holds the EDR id
-// the answer names. ipso compile then builds it like any repository check.
+// Package delivery brings the accepted checks of a control plane into a repository (ADR-0120, ADR-0158,
+// ADR-0165). For each check it writes the Rego (.rego) or LLM check specification (.llm.json) under
+// .ipso/checks, which the agent hooks protect, and adds one entry to the checks of the decision file that
+// holds the EDR id the answer names. A built-in template check has no file: its entry is the ref ipso:<id>.
+// ipso compile then builds it like any repository check.
 package delivery
 
 import (
@@ -26,6 +27,7 @@ import (
 	"github.com/ipsofacto-io/ipso/internal/rules"
 	"github.com/ipsofacto-io/ipso/pkg/llmcheck"
 	"github.com/ipsofacto-io/ipso/pkg/rulecheck"
+	"github.com/ipsofacto-io/ipso/pkg/templates"
 )
 
 // Dir is where the artifact of a delivered check is written.
@@ -45,7 +47,9 @@ var (
 )
 
 // Item is one accepted check as the control plane serves it. Engine defaults to "opa" when omitted so
-// ADR-0120 payloads decode unchanged. Engine "llm" carries LLMSpec and LLMSpecSHA256 instead of Rego.
+// ADR-0120 payloads decode unchanged. Engine "llm" carries LLMSpec and LLMSpecSHA256 instead of Rego. A
+// built-in template check carries Ref, ipso:<id>, and no payload; its engine is "opa" with target
+// "terraform-plan" or "semgrep" with no target.
 type Item struct {
 	ID              string  `json:"id"`
 	DecisionID      string  `json:"decision_id"`
@@ -60,6 +64,7 @@ type Item struct {
 	RegoSHA256      *string `json:"rego_sha256"`
 	LLMSpec         *string `json:"llm_spec,omitempty"`
 	LLMSpecSHA256   *string `json:"llm_spec_sha256,omitempty"`
+	Ref             *string `json:"ref,omitempty"`
 }
 
 // Answer is the body of GET /v1/accepted-checks.
@@ -123,11 +128,14 @@ func (i Item) validate() error {
 		return fmt.Errorf("unsupported mode %q", i.Mode)
 	}
 	eng := i.effectiveEngine()
-	if eng != "opa" && eng != "llm" {
+	if eng != "opa" && eng != "llm" && eng != "semgrep" {
 		return fmt.Errorf("unsupported engine %q", eng)
 	}
 	if i.held() {
 		return nil
+	}
+	if i.Ref != nil || eng == "semgrep" {
+		return i.validateTemplate()
 	}
 	if eng == "llm" {
 		switch {
@@ -151,6 +159,25 @@ func (i Item) validate() error {
 	return nil
 }
 
+// validateTemplate checks a template item against the catalog this ipso is built with, so an id the
+// server knows and this version does not stops the delivery instead of writing an entry ipso compile refuses.
+func (i Item) validateTemplate() error {
+	switch {
+	case i.Ref == nil:
+		return errors.New("a semgrep check for the version in force carries a template ref")
+	case i.Rego != nil || i.RegoSHA256 != nil || i.LLMSpec != nil || i.LLMSpecSHA256 != nil:
+		return errors.New("a template check carries a ref and no rego or llm_spec")
+	}
+	tmpl, ok := templates.Lookup(*i.Ref)
+	if !ok {
+		return fmt.Errorf("%s: the ref %q is not a template of this ipso version, which may be older than the server", compiler.CodeTemplateUnknown, *i.Ref)
+	}
+	if i.effectiveEngine() != tmpl.Engine || i.Target != tmpl.Target {
+		return fmt.Errorf("the template %s is engine %q with target %q, not engine %q with target %q", tmpl.Ref, tmpl.Engine, tmpl.Target, i.effectiveEngine(), i.Target)
+	}
+	return nil
+}
+
 // Status is what happened to one check.
 type Status string
 
@@ -166,7 +193,8 @@ const (
 )
 
 // Result is the outcome for one check, in the order of the answer. File is the decision file of an added or
-// present check, Rego is the delivered artifact path under .ipso/checks, and Detail says why a check was held or skipped.
+// present check, Rego is the delivered artifact path under .ipso/checks or the ref of a template check, and
+// Detail says why a check was held or skipped.
 type Result struct {
 	Item   Item
 	Status Status
@@ -243,9 +271,12 @@ func Deliver(root string, cfg config.Config, answer Answer, now time.Time) ([]Re
 				break
 			}
 			result.File = file.Shown
-			if item.effectiveEngine() == "llm" {
+			switch {
+			case item.Ref != nil:
+				result.Rego = *item.Ref
+			case item.effectiveEngine() == "llm":
 				result.Rego = path.Join(Dir, item.ID+".llm.json")
-			} else {
+			default:
 				result.Rego = path.Join(Dir, item.ID+".rego")
 			}
 			wrote, content, problem := plan(repo, root, &result, item, file, texts, changed)
@@ -287,6 +318,14 @@ func plan(repo *os.Root, root string, result *Result, item Item, file edr.Loaded
 	eng := item.effectiveEngine()
 	var payload string
 	var addCheck edr.Check
+	if item.Ref != nil {
+		// validateTemplate matched the ref, engine and target against the catalog of this build.
+		if err := rules.RefuseSymlinks(repo, file.Shown); err != nil {
+			return writes{}, "", fmt.Sprintf("check %s: %s", item.ID, err)
+		}
+		addCheck = edr.Check{Engine: eng, Target: item.Target, Ref: *item.Ref, MaxAgeDays: item.MaxAgeDays}
+		return addEntry(root, file, item, addCheck, texts, changed)
+	}
 	if eng == "llm" {
 		raw := []byte(*item.LLMSpec)
 		sum := sha256.Sum256(raw)
@@ -346,6 +385,17 @@ func plan(repo *os.Root, root string, result *Result, item Item, file edr.Loaded
 	case string(existing) != payload:
 		return writes{}, "", fmt.Sprintf("check %s: %s exists with other contents, and delivery never replaces a file", item.ID, result.Rego)
 	}
+	entry, _, problem := addEntry(root, file, item, addCheck, texts, changed)
+	if problem != "" {
+		return writes{}, "", problem
+	}
+	out.entry = entry.entry
+	return out, payload, ""
+}
+
+// addEntry folds one check entry into the text of its decision file. An entry with the same ref is
+// already there, so it adds nothing.
+func addEntry(root string, file edr.Loaded, item Item, addCheck edr.Check, texts map[string]string, changed map[string]bool) (writes, string, string) {
 	text, ok := texts[file.Shown]
 	if !ok {
 		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(file.Shown)))
@@ -360,10 +410,9 @@ func plan(repo *os.Root, root string, result *Result, item Item, file edr.Loaded
 	}
 	texts[file.Shown] = next
 	if added {
-		out.entry = true
 		changed[file.Shown] = true
 	}
-	return out, payload, ""
+	return writes{entry: added}, "", ""
 }
 
 // writeNew creates the file and its directories. It never replaces a file.
