@@ -4,9 +4,9 @@ This document explains what `ipso` accesses, what stays offline, how each check 
 
 ## Network and offline guarantees
 
-- **Strictly offline commands:** `ipso check`, `ipso explain`, `ipso compile`, `ipso check plan`, `ipso check ci`, `ipso check checkov`, `ipso check snyk`, `ipso check wiz`, `ipso check sonarqube`, `ipso check dependabot`, `ipso check pulumi`, `ipso check cloudformation`, `ipso check arm`, `ipso baseline`, `ipso bundle`, `ipso render`, `ipso rules`, `ipso mcp`, and `ipso hook` read local files only and make no network calls.
+- **Strictly offline commands:** `ipso init`, `ipso check`, `ipso explain`, `ipso import`, `ipso compile`, `ipso check plan`, `ipso check ci`, `ipso check checkov`, `ipso check snyk`, `ipso check wiz`, `ipso check sonarqube`, `ipso check dependabot`, `ipso check pulumi`, `ipso check cloudformation`, `ipso check arm`, `ipso check depcruise`, `ipso check semgrep`, `ipso check archunit`, `ipso check importlinter`, `ipso check kyverno`, `ipso check gatekeeper`, `ipso check eslint`, `ipso baseline`, `ipso bundle`, `ipso render`, `ipso rules`, `ipso mcp`, `ipso hook`, and `ipso deliver <file>` (or `-`) read local files only and make no network calls.
 - **`ipso premise check`:** Performs public HTTPS GET requests per ADR-0053. It sends no `Authorization` header and no cookies, rejects IP literals, private addresses, and redirects, and never modifies EDR files.
-- **Control-plane commands:** Only explicit control-plane operations (`ipso login`, `ipso status`, `ipso draft`, `ipso deliver --repo`, and server-mediated `ipso check llm`) open network connections.
+- **Control-plane and LLM commands:** Network connections occur in explicit control-plane operations (`ipso login`, `ipso status`, `ipso draft`, `ipso deliver --repo`) and in `ipso check llm` when compiled LLM checks run via a control plane (`--server` or logged-in session) or direct BYOLLM (`--llm-url` and `--llm-model`, which enforces redirect refusal and private-IP blocking while sending redacted inputs to the configured endpoint).
 - **Report redaction:** Verdict reports carry input/build hashes and verdict counts; resource addresses, file paths, job names, finding IDs, and violation messages stay on the terminal.
 
 ## Engine hardening
@@ -28,7 +28,7 @@ This document explains what `ipso` accesses, what stays offline, how each check 
 ## AI agent surfaces
 
 - **`ipso rules generate`:** Writes only bounded `## Decision` sections, omits titles and text of records tagged `sensitive`, preserves hand-written text outside its markers, refuses symlinks, and makes no network calls. Rules files are advisory only.
-- **`ipso mcp`:** Runs locally over stdio with no network calls and no authentication (reachable only by its parent process). Its sole write tool, `decisions.propose`, creates one new file with `status: proposed` that is never in force until approved by a person. `checks.evaluate` evaluates Rego in-process using a private temporary file that is deleted afterwards.
+- **`ipso mcp`:** Runs locally over stdio with no network calls and no authentication (reachable only by its parent process). Its sole write tool, `decisions.propose`, creates one new file with `status: proposed` that is never in force until approved by a person. `checks.evaluate` evaluates unified diffs or plans locally against compiled checks using local engines (with no outbound network calls from `ipso mcp` itself; plans pass through a private temporary file that is deleted afterwards).
 - **`ipso hook`:** Runs locally with no LLM and no network calls. Never answers `allow`, so your own permission rules stay active. Any edit to `.ipso` or a decision record (and any check that cannot run) asks a person. Shell-command matching is plain text, so hooks are a guardrail for cooperating agents rather than a sandbox; keep CI as the merge gate.
 
 ## Trusted installation and vulnerability reporting

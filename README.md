@@ -49,8 +49,8 @@ Place your EDR Markdown files under `docs/decisions/`, then run `ipso check` and
 
 | Engine / target | Input rule format | CLI command | Documentation |
 | --- | --- | --- | --- |
-| OPA (`terraform-plan`) | Repository `.rego` or built-in `ipso:<provider>/<name>` template | `ipso check plan <plan.json\|->` | [docs/templates.md](docs/templates.md) |
-| OPA (`pulumi-preview`, `cloudformation-template`, `arm-template`) | Repository `.rego` | `ipso check pulumi`, `cloudformation`, `arm` | [docs/adapters.md](docs/adapters.md) |
+| OPA (`terraform-plan`) | Repository `.rego` or built-in `ipso:<provider>/<name>` template | `ipso check plan <plan.json>` (or `-`) | [docs/templates.md](docs/templates.md) |
+| OPA (`pulumi-preview`, `cloudformation-template`, `arm-template`) | Repository `.rego` | `ipso check pulumi`, `ipso check cloudformation`, `ipso check arm` | [docs/adapters.md](docs/adapters.md) |
 | OPA (`gatekeeper`) | ConstraintTemplate + Constraint YAML | `ipso check gatekeeper <path>...` | [docs/kubernetes.md](docs/kubernetes.md) |
 | Kyverno | ValidatingPolicy YAML | `ipso check kyverno <path>...` | [docs/kubernetes.md](docs/kubernetes.md) |
 | Semgrep | Repository YAML or built-in `ipso:<lang>/<name>` template | `ipso check semgrep <path>...` | [docs/semgrep-templates.md](docs/semgrep-templates.md) |
@@ -58,10 +58,10 @@ Place your EDR Markdown files under `docs/decisions/`, then run `ipso check` and
 | ArchUnit | JSON rule file | `ipso check archunit <classes-dir>... --jars <dir>` | [docs/archunit-rules.md](docs/archunit-rules.md) |
 | import-linter | `.importlinter` INI file | `ipso check importlinter <source-dir>...` | [docs/cli-reference.md](docs/cli-reference.md#engine-compiler-rules) |
 | ESLint | JSON rule file (`javascript` or `typescript`) | `ipso check eslint <path>...` | [docs/eslint-rules.md](docs/eslint-rules.md) |
-| CI job binding | Existing CI job name (`engine: ci-binding`) | `ipso check ci <evidence.json\|-> --sha <sha>` | [docs/cli-reference.md](docs/cli-reference.md#ci-job-evidence) |
-| Checkov | Checkov check ID (`ref: CKV_*`) | `ipso check checkov <results.json\|->` | [docs/cli-reference.md](docs/cli-reference.md#engine-compiler-rules) |
-| Security scanners (`snyk`, `wiz`, `sonarqube`, `dependabot`) | Scanner finding ID in `ref` | `ipso check <tool> <evidence.json\|->` | [docs/cli-reference.md](docs/cli-reference.md#security-tool-evidence) |
-| LLM (`engine: llm`) | `.llm.json` check specification | `ipso check llm <input\|->` | [docs/deliver.md](docs/deliver.md) |
+| CI job binding | Existing CI job name (`engine: ci-binding`) | `ipso check ci <evidence.json> --sha <sha>` (or `-`) | [docs/cli-reference.md](docs/cli-reference.md#ci-job-evidence) |
+| Checkov | Checkov check ID (`ref: CKV_*`) | `ipso check checkov <results.json>` (or `-`) | [docs/cli-reference.md](docs/cli-reference.md#engine-compiler-rules) |
+| Security scanners (`snyk`, `wiz`, `sonarqube`, `dependabot`) | Scanner finding ID in `ref` | `ipso check <tool> <evidence.json>` (or `-`) | [docs/cli-reference.md](docs/cli-reference.md#security-tool-evidence) |
+| LLM (`engine: llm`) | `.llm.json` check specification | `ipso check llm <input>` (or `-`) | [docs/cli-reference.md](docs/cli-reference.md#command-reference) |
 
 ## Commands
 
@@ -82,28 +82,28 @@ Run all commands from the repository root. See [docs/cli-reference.md](docs/cli-
 | Command | Purpose |
 | --- | --- |
 | `ipso compile` | Compile in-force checks into `.ipso/build/` |
-| `ipso check plan <plan.json\|->` | Evaluate compiled OPA checks against `terraform show -json` or `tofu show -json` (or a signed bundle via `--bundle`) |
+| `ipso check plan <plan.json>` (or `-`) | Evaluate compiled OPA checks against `terraform show -json` or `tofu show -json` (or a signed bundle via `--bundle`) |
 | `ipso check <engine> ...` | Run compiled checks for `ci`, `checkov`, `snyk`, `wiz`, `sonarqube`, `dependabot`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, `eslint`, or `llm` |
-| `ipso render helm\|kustomize` | Render Helm charts or Kustomize overlays offline into plain manifests for `kyverno` and `gatekeeper` checks |
+| `ipso render helm` / `kustomize` | Render Helm charts or Kustomize overlays offline into plain manifests for `kyverno` and `gatekeeper` checks |
 
 ### Baselines and signed bundles
 
 | Command | Purpose |
 | --- | --- |
-| `ipso baseline create\|update <subcommand> <args>` | Record or trim existing violation fingerprints in `.ipso/baseline.json` so legacy findings are waived ([docs/baseline.md](docs/baseline.md)) |
+| `ipso baseline create` / `update <subcommand> <args>` | Record or trim existing violation fingerprints in `.ipso/baseline.json` so legacy findings are waived ([docs/baseline.md](docs/baseline.md)) |
 | `ipso baseline export <decision-id>` | Print sorted fingerprints for one decision as JSON for control-plane upload |
-| `ipso bundle pack\|sign\|verify` | Package `.ipso/build/` as an OCI layout, sign with PKCS#8 P-256, and verify offline |
+| `ipso bundle pack` / `sign` / `verify` | Package `.ipso/build/` as an OCI layout, sign with PKCS#8 P-256, and verify offline |
 
 ### AI coding agents and control plane
 
 | Command | Purpose |
 | --- | --- |
-| `ipso rules generate\|check` | Sync in-force decisions into `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, Copilot, Cursor, and Kiro rules files ([docs/rules-files.md](docs/rules-files.md)) |
+| `ipso rules generate` / `check` | Sync in-force decisions into `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, Copilot, Cursor, and Kiro rules files ([docs/rules-files.md](docs/rules-files.md)) |
 | `ipso mcp` | Serve local decisions and evaluation tools over stdio MCP ([docs/mcp.md](docs/mcp.md)) |
 | `ipso hook <agent> [event]` | Evaluate `agent-edit` checks for Claude Code, Codex, Copilot, Cursor, and Kiro hooks ([docs/hooks.md](docs/hooks.md)) |
 | `ipso login` / `ipso logout` | Authenticate via loopback PKCE for optional control-plane commands |
 | `ipso status` / `ipso draft` | Query decision health or draft decisions against a control plane |
-| `ipso deliver <file\|-> \| --repo <owner/name>` | Deliver accepted checks from a control plane into the repository ([docs/deliver.md](docs/deliver.md)) |
+| `ipso deliver <file>` (or `-`, or `--repo <owner/name>`) | Deliver accepted checks from a control plane into the repository ([docs/deliver.md](docs/deliver.md)) |
 
 ### Exit codes
 
@@ -127,7 +127,7 @@ Run all commands from the repository root. See [docs/cli-reference.md](docs/cli-
 
 ## Security model
 
-- **Offline by default:** Validation, compilation, plan/code/manifest checks, baselines, bundles, `ipso rules`, `ipso mcp`, and `ipso hook` make no network calls. Only `ipso premise check` (public HTTPS GET, no credentials, no redirects, no private IPs) and explicit control-plane commands (`ipso login`, `ipso status`, `ipso draft`, `ipso deliver --repo`, server-mediated `ipso check llm`) touch the network.
+- **Offline by default:** Validation, compilation, deterministic plan/code/manifest checks, baselines, bundles, `ipso rules`, `ipso mcp`, and `ipso hook` make no network calls. Network connections occur only in `ipso premise check` (public HTTPS GET, no credentials, no redirects, no private IPs), explicit control-plane commands (`ipso login`, `ipso status`, `ipso draft`, `ipso deliver --repo`), and `ipso check llm` when compiled LLM checks run via a control plane (`--server` or logged-in session) or direct BYOLLM (`--llm-url` and `--llm-model`).
 - **No untrusted repo code execution:** Compilers reject code-loading options, inline suppressions, symlinks, and network/cluster context hooks, and check runners re-verify compiled artifacts before invoking pinned external engines.
 - **Keep runner secrets out of engine steps:** External engines (JVM, Python, Node, Helm, Kustomize, Kyverno, gator) inherit non-stripped runner environment variables and are not an OS sandbox. Run check steps without unrelated secrets.
 - **Report vulnerabilities privately:** Use [GitHub private vulnerability reporting](https://github.com/ipsofacto-io/ipso/security/advisories/new) rather than opening a public issue. See [SECURITY.md](https://github.com/ipsofacto-io/.github/blob/main/SECURITY.md).
