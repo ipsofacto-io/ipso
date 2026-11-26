@@ -1,12 +1,10 @@
 # GitLab CI component
 
-`templates/check.yml` is a GitLab CI/CD Catalog component. It runs `ipso check`, `ipso compile`, and one engine check from the root of the checkout. A failed check exits non-zero, which blocks a merge request when the project requires a successful pipeline. The component does not change that project setting.
+GitLab CI/CD Catalog component ([`templates/check.yml`](templates/check.yml)) that runs `ipso check`, `ipso compile`, and one engine check from the root of a repository checkout.
 
-The job writes `ipso-evidence/report.json`, `ipso-evidence/ipso.sarif`, and `ipso-evidence/gl-code-quality.json`. GitLab shows the Code Quality report on the merge request Reports tab, including when the job fails. Inline annotations on the diff are a GitLab Ultimate feature of that same report. The component does not set `artifacts:reports:sarif`, because GitLab ingests those findings only after a successful job.
+## Usage
 
-The component holds no GitLab token. It unsets `CI_JOB_TOKEN`, `CI_REPOSITORY_URL` (the clone URL embeds that token), `GITLAB_TOKEN`, `PRIVATE_TOKEN`, the registry, dependency-proxy, and deploy passwords, `DOCKER_AUTH_CONFIG`, and `CI_JOB_JWT` and `CI_JOB_JWT_V2` before it downloads ipso or runs a check. It also removes userinfo from every http and https URL in `.git/config` and in each `.git/modules` config, removes http extraheader lines, removes a symlink at `ipso-evidence` without following it, and refuses a symlink at those config files. It does not call an ipso service. It installs ipso 0.4.0 only, after the archive sha256 matches the pin in this directory. `cli-path` skips that download. Windows runners are refused. The default image is `ubuntu:24.04`.
-
-Publishing the component to the CI/CD Catalog is manual. This repository does not create the GitLab project. After that release, a pipeline includes the component with the published project path and version:
+Publishing to the GitLab CI/CD Catalog is manual (this repository does not create the GitLab project). Once published, include the component in `.gitlab-ci.yml`:
 
 ```yaml
 include:
@@ -21,6 +19,22 @@ workflow:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 ```
 
-`command` is one of `plan`, `ci`, `checkov`, `snyk`, `wiz`, `sonarqube`, `dependabot`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, or `eslint`. The 0.4.0 pin does not contain `snyk`, `wiz`, `sonarqube`, or `dependabot`. Those need `cli-path`. One pipeline can include this component once. The job name is `ipso-check`.
+- **Supported `command` values:** `plan`, `ci`, `checkov`, `snyk`, `wiz`, `sonarqube`, `dependabot`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, `eslint`.
+- **Version pin note:** The default `ipso` `0.4.0` pin predates `snyk`, `wiz`, `sonarqube`, and `dependabot`; supply a newer binary via `cli-path` to use those commands.
+- **Pipeline limits:** Include this component at most once per pipeline (job name: `ipso-check`). Default image: `ubuntu:24.04`. Windows runners are refused.
 
-`ci / gitlab` in this repository proves the exit code, the files, and the refused inputs. A GitLab project has not run this component.
+## Artifacts and merge request behavior
+
+- A failed check exits non-zero, blocking merges when the GitLab project requires a successful pipeline (the component does not alter project settings).
+- Every run writes `ipso-evidence/report.json`, `ipso-evidence/ipso.sarif`, and `ipso-evidence/gl-code-quality.json`.
+- GitLab displays the Code Quality report on the merge request **Reports** tab even when the job fails (inline diff annotations require GitLab Ultimate). The component omits `artifacts:reports:sarif` because GitLab only ingests SARIF reports after a passing job.
+
+## Security and verification
+
+- **No GitLab tokens exposed:** Before downloading `ipso` or running checks, the component unsets `CI_JOB_TOKEN`, `CI_REPOSITORY_URL`, `GITLAB_TOKEN`, `PRIVATE_TOKEN`, registry/dependency-proxy/deploy passwords, `DOCKER_AUTH_CONFIG`, `CI_JOB_JWT`, and `CI_JOB_JWT_V2`, and strips HTTP userinfo and `extraheader` entries from `.git/config` and `.git/modules` configs.
+- **Symlink hygiene:** Removes any symlink at `ipso-evidence` without following it and refuses symlinked git config files.
+- **Verified install:** Downloads `ipso` `0.4.0` only after matching the pinned archive SHA-256 (skipped when `cli-path` is set) and makes no calls to any ipso service.
+
+## Verification status
+
+`ci / gitlab` in this repository verifies exit codes, output artifacts, and rejected inputs. This component has not been run on a live GitLab instance yet.
