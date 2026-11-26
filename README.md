@@ -3,188 +3,162 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ipsofacto-io/ipso/badge)](https://scorecard.dev/viewer/?uri=github.com/ipsofacto-io/ipso)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15758/badge)](https://www.bestpractices.dev/en/projects/15758)
 
-CLI, check compilers, agent hooks and local MCP server that turn engineering decisions into enforced checks.
+CLI, check compilers, AI agent hooks, and local MCP server that turn **Engineering Decision Records (EDRs)** into deterministic, enforced checks.
 
-> Status: the CLI can initialize a repository, validate EDR files, explain one decision, import MADR or Nygard ADRs, compile in-force checks, and evaluate a Terraform or OpenTofu plan. `ipso premise check` re-checks premises on in-force decisions with a public HTTPS GET. The OPA compiler is registered. A check with `ref: ipso:<provider>/<name>` and `target: terraform-plan` compiles a built-in template. Repository Rego is one `.rego` file. The template list is [docs/templates.md](docs/templates.md). The dependency-cruiser compiler is registered. A check with `engine: depcruise` reads one JSON rule file and writes `depcruise.json`. `ipso check depcruise <path>...` runs `depcruise` from `PATH` on that file. The Semgrep compiler is registered. A check with `engine: semgrep` reads one YAML rule file, or `ref: ipso:<language>/<name>` for a built-in template, and writes `semgrep.yaml`. `ipso check semgrep <path>...` runs the pinned `semgrep` from `PATH` on that file. The template list is [docs/semgrep-templates.md](docs/semgrep-templates.md). The ArchUnit compiler is registered. A check with `engine: archunit` reads one JSON rule file and writes `ArchitectureTest.java`. `ipso check archunit <classes-dir>... --jars <dir>` runs the pinned ArchUnit jars on that file. The rule file is [docs/archunit-rules.md](docs/archunit-rules.md). The import-linter compiler is registered. A check with `engine: importlinter` reads one `.importlinter` file and writes `importlinter.ini`. `ipso check importlinter <source-dir>...` runs the pinned import-linter and grimp from `python` on that file. The Kyverno compiler is registered. A check with `engine: kyverno` reads one ValidatingPolicy YAML file and writes `kyverno.yaml`. `ipso check kyverno <path>...` runs the pinned `kyverno` from `PATH` on that file. A check with `engine: opa` and `target: gatekeeper` reads one YAML file with a ConstraintTemplate and a Constraint and writes `constraint-template.yaml` and `constraint.yaml`. `ipso check gatekeeper <path>...` runs the pinned `gator` from `PATH` on those files. The ESLint compiler is registered. A check with `engine: eslint` reads one JSON rule file and writes `eslint.config.mjs`. `ipso compile` does not run ESLint. `ipso check eslint <path>...` runs the pinned `eslint` from `PATH` on that file. The rule file is [docs/eslint-rules.md](docs/eslint-rules.md). `ipso check plan` evaluates the compiled checks against `terraform show -json` or `tofu show -json` output. The CI-binding compiler is registered. A check with `engine: ci-binding` writes `binding.json` from `job`. `ipso check ci` reads an evidence file for one commit and fails when that job is missing or did not succeed. The Checkov compiler is registered. A check with `engine: checkov` writes `binding.json` from a check id in `ref`. `ipso check checkov` reads a Checkov JSON report and fails when that id failed, was skipped, or was not reported. A check with `engine: snyk`, `wiz`, `sonarqube`, or `dependabot` writes `binding.json` from a finding id in `ref`. `ipso check snyk`, `ipso check wiz`, `ipso check sonarqube`, and `ipso check dependabot` read one evidence file and fail when that id is open. A scan that did not finish is an error. None of these commands calls a network service. The conformance suite compiles the OPA, Semgrep, dependency-cruiser, ArchUnit, import-linter, Kyverno, Gatekeeper, and ESLint fixtures and fails when a pinned engine disagrees with the expected verdict. `ci / conformance` runs it on every pull request and on every push to `main`. `release / conformance` runs it before a tag publishes. Every engine check takes `--sarif <file>` and writes a SARIF 2.1.0 run for GitHub code scanning, as described in [docs/sarif.md](docs/sarif.md). `ipso baseline create|update` records existing violations as fingerprints in `.ipso/baseline.json`, and later checks waive them, as described in [docs/baseline.md](docs/baseline.md). `ipso render helm` and `ipso render kustomize` write plain manifests from a chart or an overlay, offline, for `ipso check kyverno` and `ipso check gatekeeper`, as described in [docs/kubernetes.md](docs/kubernetes.md). `ipso check pulumi`, `ipso check cloudformation`, and `ipso check arm` evaluate repository Rego against `pulumi preview --json`, a CloudFormation or `cdk synth` template, and an ARM or `bicep build` template, as described in [docs/adapters.md](docs/adapters.md). `ipso rules generate` writes the decisions in force into the files AI coding agents read, as described in [docs/rules-files.md](docs/rules-files.md). `ipso mcp` serves the decisions of a checkout to an agent over stdio, as described in [docs/mcp.md](docs/mcp.md). `ipso hook` answers the hooks of Claude Code, Codex, Copilot, Cursor, and Kiro from a local build or a signed bundle, as described in [docs/hooks.md](docs/hooks.md).
-
-This is the Apache-2.0 adoption surface for ipso. One Go workspace will hold the EDR library, the check compilers, the connector SDK, the compiler plugin SDK, policy bundles, the CLI, agent hooks, the local MCP server, rules-file generators and the documentation site.
-
-Module rule: this module does not require `ipso-server`. Its public packages under `pkg/` keep CLI and control-plane evaluation aligned: `pkg/edrcheck` and `pkg/edrrender` validate and render EDR files, `pkg/plancheck` evaluates a plan against a signed bundle, `pkg/rulecheck` vets and runs agent-edit Rego rules, `pkg/llmcheck` vets `.llm.json` specifications, redacts inputs, and verifies verbatim quotes for `engine: llm` checks, `pkg/premisecheck` re-checks a premise URL with the same client and address policy as `ipso premise check`, and `pkg/mcptools` holds the MCP tool contract (`checks.evaluate`, `decisions.applicable`, `decisions.get`, `decisions.health`, `decisions.propose`, and `decisions.verifiability`) both servers register. Everything else stays internal. The EDR 1.1.0 JSON Schema is embedded from `edr-spec` so `ipso check` stays offline. `ipso login` authenticates the CLI via loopback PKCE for optional control-plane commands (`ipso draft`, `ipso status`, `ipso deliver --repo`, and server-mediated `ipso check llm`).
+`ipso` is the Apache-2.0 adoption surface for the ipso ecosystem. It validates EDR files offline against the embedded EDR 1.1.0 schema, compiles in-force decisions into checks for policy and static analysis engines you already run, and enforces them in CI, on infrastructure plans, and before AI coding agents edit code.
 
 ## Install
 
-Pick one:
+Choose one option:
 
 ```bash
-brew install ipsofacto-io/tap/ipso
-```
-
-```bash
+# Go toolchain
 go install github.com/ipsofacto-io/ipso/cmd/ipso@latest
 ```
 
-Or download a release binary from [GitHub Releases](https://github.com/ipsofacto-io/ipso/releases). Each release publishes `checksums.txt`, keyless cosign signatures, and GitHub artifact attestations. The container image `ghcr.io/ipsofacto-io/ipso` is still private.
+```bash
+# Homebrew (once the tap release secret is enabled)
+brew install ipsofacto-io/tap/ipso
+```
+
+You can also download prebuilt binaries from [GitHub Releases](https://github.com/ipsofacto-io/ipso/releases). Every release ships `checksums.txt`, keyless cosign signatures, a CycloneDX SBOM, and GitHub artifact attestations. (The container image `ghcr.io/ipsofacto-io/ipso` is currently private.)
 
 ## Quick start
 
-From a repository that will hold Engineering Decision Records (EDR files):
+From the root of a repository that stores Engineering Decision Records:
 
 ```bash
-ipso init
-ipso check
-ipso explain <slug>
+ipso init            # creates .ipso/config.yaml
+ipso check           # validates all EDR files against the schema
+ipso compile         # compiles in-force checks into .ipso/build/
+ipso explain <slug>  # prints a decision's metadata and Decision section
 ```
 
-`ipso init` writes `.ipso/config.yaml` when that file is absent. The default glob is `docs/decisions/**/*.md`. Put EDR Markdown files under that path, then run `ipso check`. Use `ipso explain <slug>` to print the title, status, id, path, sources, and Decision section for one file.
-
-## GitHub Actions
-
-[`ipsofacto-io/ipso-action`](https://github.com/ipsofacto-io/ipso-action) runs one check in a job, uploads its SARIF file to code scanning, and keeps the evidence as an artifact. [docs/github-action.md](docs/github-action.md) has an example workflow.
-
-## Azure Pipelines
-
-The task in [`packaging/azure-pipelines`](packaging/azure-pipelines) runs one check on a Linux or macOS agent and leaves the SARIF file and the verdict report for the pipeline to publish. [docs/azure-pipelines.md](docs/azure-pipelines.md) has the example, the pin, and the Windows refusal. Publishing the extension is a manual step, and the example pipeline has not been run on Azure DevOps.
-
-## GitLab
-
-The component in [`packaging/gitlab`](packaging/gitlab) runs one check on a Linux or macOS runner, fails the job on a violation, and publishes a Code Quality report. [docs/gitlab.md](docs/gitlab.md) has the example, the pin, and the token rules. Publishing the catalog release is a manual step, and the example pipeline has not been run on GitLab.
-
-## Backstage
-
-The plugin in [`packaging/backstage`](packaging/backstage) shows the decisions in force for a catalog entity and how many of them have passing checks. The person token stays on the Backstage backend. Publishing to npm is a manual step, and this repository does not start a Backstage app.
-
-## Atlantis
-
-A server-side Atlantis workflow runs `ipso check plan` in the plan stage and removes the plan file on a failed verdict, so `atlantis apply` has nothing to apply. [docs/atlantis.md](docs/atlantis.md) has the workflow.
-
-## Spacelift, env0, and Scalr
-
-A hook on the platform's worker runs `ipso check plan` against the run's own plan, and a non-zero exit stops the run. [docs/platforms.md](docs/platforms.md) has the hook for each platform and what still has to be validated on it.
-
-## Secure use
-
-- `ipso check`, `ipso explain`, `ipso compile`, `ipso check plan`, `ipso check ci`, `ipso check checkov`, `ipso check snyk`, `ipso check wiz`, `ipso check sonarqube`, `ipso check dependabot`, `ipso check pulumi`, `ipso check cloudformation`, and `ipso check arm` run offline. They read local files that match the config globs and do not call a network service. `ipso premise check` performs the public HTTPS GET from ADR-0053. It sends no Authorization header and no cookies, refuses an IP literal, a private address, and a redirect, and it does not edit the EDR.
-- The tool validates EDR structure against the embedded EDR 1.0.0 schema. It does not execute decision text as code. `ipso compile` writes artifacts for registered engines. A dependency-cruiser rule file is JSON. Compile validates it and does not execute it. Options that load code, write a cache, or grandfather violations are rejected. An ArchUnit rule file is JSON. Compile validates it and writes a JUnit test that embeds only package patterns. `ipso check archunit` regenerates that test from the verified artifact and refuses anything the generator would not write, so no Java file from the repository is compiled or run. It checks the sha256 of the three pinned jars, copies only `.class` files from the named directories, drops `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`, `JDK_JAVAC_OPTIONS`, and `CLASSPATH`, and runs the JVM in a temporary directory. The JVM inherits the rest of the runner environment, so run that step without secrets. An import-linter file is INI. Compile rejects `contract_types` and a dotted root package, and it does not import repository code. `ipso check importlinter` recovers the contracts from the verified artifact and refuses any config the compiler would not write, so the repository's own `.importlinter` file is never read. It copies only the `*.py` files of each root package and refuses a symlink anywhere below it. It then runs the pinned import-linter and grimp with `python -I` and a finder that answers the root names with that copy and refuses to execute it, so repository Python is parsed and never imported. python inherits the rest of the runner environment, so run that step without secrets. A Kyverno file is one ValidatingPolicy. Compile parses its CEL and rejects context variables that reach the network or the cluster. `ipso check kyverno` compiles the verified `kyverno.yaml` again and requires the same bytes, so the repository's own policy file is never read and an artifact edited together with its manifest is never run. It copies only the `.yaml` and `.yml` files of the named paths, refuses a symlink anywhere below a named directory, drops every `KYVERNO_*` variable, and runs the pinned Kyverno CLI in a temporary directory with no cluster, no registry, and no exception flag. The CLI inherits the rest of the runner environment, so run that step without secrets. A Gatekeeper file is a ConstraintTemplate and a Constraint. Compile type-checks the Rego and rejects `data.inventory` and `http.send`. `ipso check gatekeeper` compiles the verified template and constraint again and requires the same bytes, so the repository's own policy file is never read and an artifact edited together with its manifest is never run. It copies only the `.yaml` and `.yml` files of the named paths, refuses a symlink anywhere below a named directory, refuses a Gatekeeper object, a list that wraps objects, or a document that a YAML parser and gator could read differently, and runs the pinned gator in a temporary directory with no image and no network. gator inherits the runner environment, so run that step without secrets. An ESLint file is JSON. Compile rejects `__proto__` and writes a config that ignores inline disable comments. `ipso check eslint` reads the verified config back into its data, compiles that data again, and refuses any difference, so no JavaScript from the repository or from an edited manifest reaches ESLint. It never loads a repository ESLint config, an `eslint-suppressions.json`, or a directive comment. It needs eslint, typescript-eslint, and TypeScript at the pinned releases in a `node_modules` directory outside the repository, because those packages decide the verdict. It drops every `ESLINT_*` variable and `TIMING`, and ESLint inherits the rest of the runner environment, so run that step without secrets. `ipso check plan` evaluates the compiled Rego against a plan and writes a verdict report. The report carries the plan hash and verdict counts. Resource addresses and messages stay on the terminal. `ipso check ci` and `ipso check checkov` evaluate compiled bindings against a local evidence file. `ipso check snyk`, `ipso check wiz`, `ipso check sonarqube`, and `ipso check dependabot` do the same for a finding evidence file. The report carries hashes and verdict counts. Job names, Checkov resource names, file paths, and finding ids stay on the terminal.
-- `ipso rules generate` writes only the Decision section of a record, bounded, and leaves out the title and text of a record tagged `sensitive`. It keeps hand-written text around its block, refuses symlinks, and calls no network service. Rules files are advisory context for an agent and do not enforce anything.
-- `ipso mcp` makes no network call and has no authentication, because only the process that started it can reach it. `decisions.propose` is its one write: one new file with `status: proposed`, never in force until a person approves it. `checks.evaluate` runs Rego in the process and writes nothing to the repository. A plan goes through a private temporary file that is removed afterwards.
-- `ipso hook` decides on this machine with no LLM and makes no network call. It never answers allow, so a person's own permission rules still apply. An edit to a decision record or to `.ipso` asks a person, and so does a check that cannot run. The search of a shell command is plain text, so the hook guards a cooperating agent and is not a sandbox. CI remains the gate.
-- `ipso render helm` and `ipso render kustomize` run the pinned `helm` and `kustomize` from `PATH` in a temporary directory with only the environment ipso sets: an empty `PATH`, a temporary home, no kubeconfig, and proxy variables that point at a closed port. A Kustomize base, component, generator, transformer, or validator that is not a file or directory inside the repository, a symlink below a chart or a walked directory, a remote values file, a post-renderer, and any plugin are refused or never enabled. That limits what the tools are asked to do, and it is not an operating system sandbox, so run that step without secrets. The rendered file can hold chart values. It is written at mode 0600 in a directory at mode 0700 with a `.gitignore` of `*`, and it is never printed.
-- Prefer release binaries or Homebrew over building unreviewed forks when you need a trusted install. Verify release checksums and signatures when you download from GitHub Releases.
-- Report security problems privately through [GitHub private vulnerability reporting](https://github.com/ipsofacto-io/ipso/security/advisories/new). Do not open a public issue for a vulnerability. See the [security policy](https://github.com/ipsofacto-io/.github/blob/main/SECURITY.md).
-
-## Commands
-
-- `ipso init` writes `.ipso/config.yaml` when that file is absent. The default glob is `docs/decisions/**/*.md`.
-- `ipso check` validates every matched EDR file against the EDR 1.0.0 schema and the required headings. It does not run check engines.
-- `ipso premise check [--report file]` probes premises on decisions that are in force today, the same status and date rule as `ipso compile`. For each premise it performs one public HTTPS GET, compares the JSON pointer with `equals` or `semver`, and prints `<path>: <premise-id>: pass`, `fail`, or `error: <reason>`. It does not read `every`, does not edit the EDR, and does not call the registry. `--report` writes the premise id, the result, the expected and observed values, and the body hash. The report does not contain the response body. Exit 0 when every selected probe passed or failed, including when none were selected. Exit 1 when a probe errored, a record is invalid, or two in-force records share an id. Exit 2 on bad usage.
-- `ipso explain <slug>` prints the title, status, id, path, sources, and Decision section of that file.
-- `ipso import` rewrites MADR and Nygard ADR files under `docs/adr` and `docs/decisions` into EDR files. Fields the source did not contain are filled in, and `inferred` is set to true. A file that is already a valid EDR file is left unchanged.
-- `ipso deliver <accepted-checks.json|->` brings the agent-edit checks that a person accepted in a control plane into this repository. It reads the answer of `GET /v1/accepted-checks?repo=<owner/name>` from a file or from stdin and opens no connection, so you fetch it with your own token: `curl -sS "$IPSO/v1/accepted-checks?repo=acme/api" -H "Authorization: Bearer $TOKEN" | ipso deliver -`. For each check it writes the Rego under `.ipso/checks/<check id>.rego`, which the agent hooks protect, and adds `{engine: opa, target: agent-edit, ref: .ipso/checks/<check id>.rego}` to the `checks` of the decision file whose `id` is the one the answer names. The digest must match the Rego, the Rego must pass the vet that `ipso compile` runs, and a file that exists with other bytes is never replaced. A check accepted for a version of its decision that is not in force is reported and not delivered. Review the change like any change to a decision, then run `ipso compile`. See [docs/deliver.md](docs/deliver.md).
-- `ipso check plan <plan.json> [--env name] [--input name] [--report file] [--sarif file]` evaluates the compiled checks in `.ipso/build/` against one plan. Run `ipso compile` first, and again after a decision changes: the command trusts the build for status, waivers, and environments, and re-checks only the dates. Without `--env`, checks that name an environment are evaluated too. The plan is the JSON from `terraform show -json` or `tofu show -json`, or `-` to read it from stdin. A check is evaluated when its engine is `opa`, its target is `terraform-plan`, its decision is in force today, and `--env` is absent or the decision applies in that environment. A waiver in force today turns the violations of its decision into a waived result. The report written by `--report` contains the plan hash, the build hash, and one verdict per evaluated check. It does not contain plan values, resource addresses, or messages. With `--bundle <layout> --digest sha256:<hex> --key <public.pem>`, the command verifies that signed OCI layout and does not read `.ipso/build`. An unsigned layout, a bad signature, or a digest that is not the image manifest fails before evaluation. The command does not use the network.
-- `ipso bundle pack --layout <dir>` writes an OCI image layout of `.ipso/build` and prints `sha256:<digest>`. `ipso bundle sign --layout <dir> --key <private.pem>` signs that image manifest with an unencrypted PKCS#8 P-256 key and refuses a second signature. `ipso bundle verify --layout <dir> --digest sha256:<hex> --key <public.pem>` checks the pin and the signature. None of these commands use the network. An unsigned layout, a bad signature, or a digest that is not the image manifest fails. The layout directory is mode 0700.
-- `ipso check pulumi <preview.json|->`, `ipso check cloudformation <template|->`, and `ipso check arm <template.json|->` take `[--env name] [--input name] [--report file] [--sarif file]` and evaluate compiled OPA checks whose target is `pulumi-preview`, `cloudformation-template`, or `arm-template` against one input the tool wrote. They read the file and call nothing: no parameter is resolved and no expression is evaluated. [docs/adapters.md](docs/adapters.md) has the input each policy reads and its limits.
-- `ipso render helm <chart-dir> --out <dir> [--values file]... [--release name] [--namespace name] [--kube-version version]` and `ipso render kustomize <dir> --out <dir>` write `<dir>/manifests.yaml` from a chart or an overlay with the pinned Helm 4.3.1 or Kustomize 5.8.3 from `PATH`. They do not use the network or a cluster, and they do not produce a verdict: `ipso check kyverno <dir>` and `ipso check gatekeeper <dir>` read the file. [docs/kubernetes.md](docs/kubernetes.md) has the rules.
-- `ipso rules generate` writes the decisions in force into `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, Copilot instructions, Cursor rules, and Kiro steering files, scoped per path. `ipso rules check` writes nothing and exits `1` when a file differs. Both are described in [docs/rules-files.md](docs/rules-files.md).
-- `ipso mcp` serves `decisions.applicable`, `decisions.get`, `checks.evaluate`, and `decisions.propose` over stdio for the current directory. See [docs/mcp.md](docs/mcp.md).
-- `ipso hook <agent> [event]` reads one hook event on stdin and answers in that agent's format. See [docs/hooks.md](docs/hooks.md).
-- `ipso compile` compiles checks on records that are in force today. A record is in force when its status is `accepted`, `verified`, or `needs-review` and today falls in `[valid_from, valid_to)`. It replaces `.ipso/build/` with a manifest and the artifact files. The directory contains a `.gitignore` of `*`. A check with no registered compiler is reported and skipped. `llm-advisory` is reported as advisory and is not compiled. An explicit check `mode` is kept. Otherwise `blocking`, `warning`, and `advisory` become `block`, `warn`, and `advise`. For `engine: opa`, `ref: ipso:<provider>/<name>` selects a built-in Terraform plan template and requires `target: terraform-plan`. Any other `ref` is one Rego file in the repository. The compiler writes `policy.rego` after the module parses, and `terraform.rego` for a template. It does not evaluate the plan. For `engine: depcruise`, `ref` is one JSON rule file in the repository. The compiler writes `depcruise.json` and does not run dependency-cruiser. Rule severity follows the check mode (`block` to `error`, `warn` stays `warn`, `advise` to `info`), and a rule set to `ignore` stays `ignore`. `extends` is rejected. So are options that load code, select another compiler, follow symlinks, or write files (`webpackConfig`, `babelConfig`, `cache`, `externalModuleResolutionStrategy`, `parser`, `detectJSDocImports`, `detectImportsInAmbientModules`, `preserveSymlinks`), options that grandfather violations (`knownViolations`, `baseline`, `ignoreKnown`), and options that only shape a report (`focus`, `reaches`, `highlight`, `collapse`, `affected`, `prefix`, `suffix`, `progress`, `reporterOptions`). `baseDir` and `tsConfig.fileName` must stay inside the repository. `doNotFollow`, `exclude`, and `includeOnly` are regular expressions, not paths. Run the result from the repository root with `depcruise --config .ipso/build/<decision-id>/<check-index>/depcruise.json <paths>`, or with `ipso check depcruise <path>...`. That command runs `depcruise` from `PATH` on a temporary copy of the verified config. The binary version must satisfy a caret range of the compiled `compiler_version` (today `^18.7.0`). Each check has 10 minutes. A missing binary, a version outside that range, a cruise that reports an environment issue, or a cruise that finds no modules fails the check. For `engine: semgrep`, `ref` is one `.yaml` or `.yml` rule file, or `ipso:<language>/<name>` for a built-in template ([docs/semgrep-templates.md](docs/semgrep-templates.md)). The compiler writes `semgrep.yaml`. Severity follows the check mode (`block` to `ERROR`, `warn` to `WARNING`, `advise` to `INFO`). Autofix, join mode, extract mode, and version gates are rejected. `options` keeps a closed list of Semgrep 1.182.1 matching options and rejects `interfile`, `taint_match_on`, `commutative_compop`, and any other key. Run the result from the repository root with `ipso check semgrep <path>...`. That command runs the pinned `semgrep` from `PATH` on a temporary copy of the verified config. The binary version must equal the compiled `compiler_version` (today `1.182.1`). Each distinct config has 10 minutes. A missing binary, a version that is not the pin, a scan that reports an error or skips a rule, or a scan that checks no files fails the check. For `engine: archunit`, `ref` is one JSON rule file in the repository. The compiler writes `ArchitectureTest.java` and does not run ArchUnit. The rule file is [docs/archunit-rules.md](docs/archunit-rules.md). Add `.ipso/build` as a test source root, with ArchUnit 1.5.1 and JUnit Jupiter on the test classpath. Or run `ipso check archunit <classes-dir>... --jars <dir>` from the repository root after the build. That command regenerates the test from the verified artifact, compiles it with `javac` from `PATH`, and runs it with the pinned jars and the JUnit console in a separate JVM for each check. `<classes-dir>` is a compiled class directory such as `target/classes`. `--jars` is a directory that holds the three pinned jars ([docs/archunit-rules.md](docs/archunit-rules.md)). Each check has 10 minutes for `javac` and the JVM together. A missing or modified jar, a JDK older than 17, a named directory that is missing or holds a symlink, a rule that checks no classes, or a tree with no class file under the imported packages fails the check. For `engine: importlinter`, `ref` is one `.importlinter` file. The compiler writes `importlinter.ini` and does not run import-linter. It accepts the five built-in contract types in import-linter 2.15 and rejects `contract_types`, report-only keys, and a dotted root package. A layers list and an independence module list need at least two entries. Run the result from the repository root with `lint-imports --config .ipso/build/<decision-id>/<check-index>/importlinter.ini --no-cache`, with the repository's packages importable. Or run `ipso check importlinter <source-dir>...` from the repository root after the build. `<source-dir>` is a directory that holds root packages, such as `.` or `src`. Each root package must have a `__init__.py` in exactly one of the named directories. That command runs `python` from `PATH`, which must carry import-linter 2.15 and grimp 3.18 from the hash-locked requirements, on the canonical config and a copy of the sources, in a separate process for each check with 10 minutes each. A violation is one rendered chain, one illegal import, or one module that is not a layer. A missing python, another import-linter or grimp release, a named directory that is missing or holds a symlink, a root package that is not found, a root named like a module the engine imports, a run that reports an engine error, or output that is not the report ipso reads fails the check. A wildcard module expression, or a layers contract whose layers are all optional, that matches nothing keeps import-linter's own result. For `engine: kyverno`, `ref` is one `.yaml` or `.yml` ValidatingPolicy. The compiler writes `kyverno.yaml` and does not run Kyverno. `validationActions` follows the check mode (`block` to `Deny`, `warn` to `Warn`, `advise` to `Audit`). Context variables `http`, `image`, `resource`, `globalContext`, and `generator` are rejected. Run the result with `kyverno apply .ipso/build/<decision-id>/<check-index>/kyverno.yaml --resource <manifest> --policy-report --output-format json`. Or run `ipso check kyverno <path>...` from the repository root after the build. `<path>` is a manifest file or a directory. That command runs `kyverno` from `PATH`, which must be release 1.19.2 (the pin in `internal/compiler/kyverno/testdata/tool/bin.lock`), on the canonical policy and a copy of the `.yaml` and `.yml` files of the named paths, in a separate process for each check with 10 minutes each. A violation is one resource that fails the policy. A missing binary, another release, a named path that is missing or holds a symlink, a tree with no manifest, a manifest the CLI cannot load, two manifests that name the same resource, a result that is an error, or output that is not the report ipso reads fails the check. A tree with no resource that the policy matches passes. For `engine: opa` and `target: gatekeeper`, `ref` is one YAML file with a ConstraintTemplate and a Constraint. The compiler writes `constraint-template.yaml` and `constraint.yaml` and does not run gator. Rego is v1. `enforcementAction` follows the check mode (`block` to `deny`, `warn` stays `warn`, `advise` to `dryrun`). `data.inventory` and `import rego.v1` are rejected. Run the result with `gator test -f .ipso/build/<decision-id>/<check-index>/constraint-template.yaml -f .ipso/build/<decision-id>/<check-index>/constraint.yaml -f <manifest> -o json`. Or run `ipso check gatekeeper <path>...` from the repository root after the build. `<path>` is a manifest file or a directory. That command runs `gator` from `PATH`, which must be release 3.23.1 with OPA v1.17.1 (the pin in `internal/compiler/opa/testdata/tool/bin.lock`), on the canonical template and constraint and a copy of the `.yaml` and `.yml` files of the named paths, in a separate process for each check with 10 minutes each. A violation is one result for one object. A missing binary, another release, a named path that is missing or holds a symlink, a tree with no manifest or no object, a Gatekeeper object or a list among the manifests, a manifest gator cannot load, or output that is not the result ipso reads fails the check. For `engine: eslint`, `ref` is one JSON rule file and `target` is `javascript` or `typescript`. The compiler writes `eslint.config.mjs` and does not run ESLint. The rule file is [docs/eslint-rules.md](docs/eslint-rules.md). Severity follows the check mode (`block` to `error`, `warn` and `advise` to `warn`). The config sets `noInlineConfig`. Run the result from the repository root with `eslint --config .ipso/build/<decision-id>/<check-index>/eslint.config.mjs --suppressions-location <suppressions.json>`, where that file holds `{}`. `ipso check eslint <path>...` does that for every in-force check: it runs the pinned `eslint` from `PATH` on the verified config, with a suppressions file that holds `{}`, over the named files and directories, and applies the check mode, waivers, and environment. A missing binary, another release, a toolchain inside the repository, a named path that is missing, a file that could not be parsed, a suppression that hid a finding, a run that lints no file, or output that is not the result ipso reads fails the check. For `engine: ci-binding`, `job` is the name of an existing CI job. The compiler writes `binding.json` and does not call the CI provider. `ipso check ci <evidence.json> --sha <sha>` fails when that job is missing from the evidence file or did not conclude `success`. For `engine: checkov`, `ref` is a Checkov id such as `CKV_AWS_24`. The compiler writes `binding.json` and does not run Checkov. `ipso check checkov <results.json>` fails when that id is failed, skipped, or absent. Do not pass `--quiet` to Checkov: that JSON drops passed checks, so a check that passed is reported as not reported. For `engine: snyk`, `wiz`, `sonarqube`, or `dependabot`, `ref` is the finding id. The compiler writes `binding.json` and does not run the scanner. `ipso check <tool> <evidence.json>` fails when that id is open on a finished scan. A scan that did not finish is an error, and a waiver does not cover it. An id that is absent from a finished scan passes. Write the evidence file in the job from the scanner output. Do not pass a file committed in the pull request.
-
-## CI job evidence
-
-`ipso check ci` does not call GitHub. It trusts the evidence file and `--sha`. The workflow below is what keeps another app from spoofing a job name: it asks only for check runs from the GitHub Actions app, `app_id` 15368. `$SHA` is the pull request head, which is the commit the jobs ran on. The job needs `checks: read`.
-
-```yaml
-permissions:
-  checks: read
-  contents: read
-steps:
-  - uses: actions/checkout@v4
-  - name: Job evidence
-    env:
-      SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      GH_TOKEN: ${{ github.token }}
-    run: |
-      gh api --method GET -H "Accept: application/vnd.github+json" \
-        "repos/${{ github.repository }}/commits/${SHA}/check-runs?filter=latest&app_id=15368&per_page=100" \
-        --jq '{evidence_version:1, sha:env.SHA, jobs:[.check_runs[] | {name:.name, conclusion:.conclusion}]}' \
-        > evidence.json
-      ipso check ci evidence.json --sha "$SHA"
-```
-
-`gh` reads `GH_TOKEN`. `env.SHA` is how `gh --jq` reads the environment. A job that has not finished has `conclusion: null`, and the verdict fails closed. ipso trusts the evidence file and `--sha`. Write the file in this job. The SHA is `github.event.pull_request.head.sha` or `github.sha`. This snippet reads one page of 100 check runs. A repository with more must paginate. A job that is not in the file fails closed.
-
-## Security tool evidence
-
-`ipso check snyk`, `ipso check wiz`, `ipso check sonarqube`, and `ipso check dependabot` do not call the scanner. Each reads one evidence file of at most 1 MiB. Unknown keys are rejected. `tool` must match the command. `status` is `success` or `failed`. `findings` is an array of objects that have only `id`. On `success`, a bound id that appears fails once per object, and an id that is absent passes. On `failed`, every selected check is an error, and a waiver does not cover it. There is no `--sha`. Write the file in the job from the scanner output, and do not pass a file committed in the pull request. The report and the SARIF file carry the evidence hash and the verdict counts. Finding ids stay on the terminal.
-
-```json
-{"evidence_version": 1, "tool": "snyk", "status": "success", "findings": [{"id": "SNYK-JS-LODASH-590103"}]}
-```
-
-The producer copies every open id and sets `failed` only when the scan did not finish. Severity is not a field. Snyk Open Source copies `vulnerabilities[].id` from `snyk test --json`. Snyk Code copies the SARIF `ruleId`. SonarQube copies the issue rule key. Dependabot copies the GHSA id of an open alert. Wiz copies the rule or control id the decision names. ipso does not read those vendor documents.
-
-## CLI reference
-
-Working directory is the repository root. There are no global flags beyond help and version.
-
-| Invocation | Effect |
-| --- | --- |
-| `ipso init` | Create `.ipso/config.yaml` with `decisions: [docs/decisions/**/*.md]` when missing. Print `wrote .ipso/config.yaml` or `.ipso/config.yaml already exists`. Exit `0`, or `1` on I/O error, or `2` on bad usage. |
-| `ipso check` | Load config (or the default globs), match EDR files, validate each. Print `<path>: ok`, `<path>: <problem>`, or `no EDR files found`. Exit `0` when every file is valid or none match, `1` when any file fails, `2` on bad usage. |
-| `ipso explain <slug>` | Find the EDR whose front matter `slug` matches. Print `title:`, `status:`, `id:`, `path:`, any `sources:`, then the `## Decision` body. Exit `0` on success, `1` when missing or ambiguous, `2` on bad usage. |
-| `ipso baseline create\|update <subcommand> <args>` | Run one engine check with the arguments of `ipso check` and record or trim fingerprints in `.ipso/baseline.json`, one set per `--env` and `--input`. `create` adds entries only for checks with none for that input. `update` only removes fingerprints that no longer occur. Run `ipso compile` afterwards. `ci` is refused. Exit `0` on success even with violations, `1` on errors or `update` with no file, `2` on bad usage. |
-| `ipso baseline export <decision-id>` | Print the fingerprints of one decision from `.ipso/baseline.json` as one sorted JSON list, with no salt, for the web app to upload. It writes no file and opens no connection. See [docs/baseline.md](docs/baseline.md) |
-| `ipso import [path...]` | Rewrite each MADR or Nygard Markdown file in place as an EDR file. With no path, use `docs/adr` and `docs/decisions`. Print `<path>: imported inferred`, `<path>: skipped` for a file that already validates, `<path>: <problem>`, or `no ADR files found`. Exit `0` when every file is imported, skipped, or none are found, `1` when any file fails, `2` on bad usage. |
-| `ipso deliver <accepted-checks.json\|->` | Deliver the accepted agent-edit checks in the answer of a control plane into this repository. Print `<path>: added check <id> (<rego path>)` or `<path>: check <id> is already delivered` on stdout, and `check <id>: held, <reason>` or `check <id>: skipped, <reason>` on stderr. A held check was accepted for a version of its decision that is not in force. A skipped check names no EDR id, or no decision file in force here has it. Exit `0` when every check was delivered, was already there, was held or was skipped, `1` when the answer is malformed, a digest does not match, the Rego fails the vet, a file holds other bytes, a path is a symlink, a decision file is invalid, or two records share an id, with nothing written, `2` on bad usage. |
-| `ipso check plan <plan.json\|-> [--env name] [--input name] [--report file] [--sarif file] [--bundle dir --digest sha256:hex --key public.pem]` | Evaluate compiled `terraform-plan` checks in `.ipso/build/` against one plan. Print `<slug>: checks[N] (mode): pass`, `<slug>: checks[N] (mode): waived`, `<slug>: checks[N] (mode): <address>: <message>`, or `<slug>: checks[N] (mode): error: <reason>`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when the plan is not a plan, or when `.ipso/build` is missing or its artifacts do not match the manifest, `2` on bad usage. With `--bundle`, verify that OCI layout and evaluate it instead of `.ipso/build`. An unsigned layout, a bad signature, or a mismatched digest exits `1` before evaluation. |
-| `ipso bundle pack --layout dir` | Write an OCI layout of `.ipso/build` and print `sha256:<digest>`. Exit `0` on success, `1` when the build is missing or the layout cannot be written, `2` on bad usage. |
-| `ipso bundle sign --layout dir --key private.pem` | Sign the layout's image manifest with an unencrypted PKCS#8 P-256 key. Print the same digest. Exit `1` when the layout is already signed or the key is not a P-256 PKCS#8 key. |
-| `ipso bundle verify --layout dir --digest sha256:hex --key public.pem` | Check the pin and the signature, then the artifact hashes. Print the digest. Exit `1` when the layout is unsigned, the digest does not match, or the signature is not valid. The command does not use the network. |
-| `ipso check ci <evidence.json\|-> --sha <sha> [--env name] [--report file] [--sarif file]` | Evaluate compiled `ci-binding` checks against a job evidence file for that commit. Exit `0` when every selected block-mode job succeeded, `1` when a bound job is missing or did not succeed, when the evidence is for another sha, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso check checkov <results.json\|-> [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled `checkov` checks against a Checkov JSON report. Exit `0` when every selected block-mode id passed, `1` when an id failed, was skipped, or was not reported, or when the report has a parsing error, `2` on bad usage. |
-| `ipso check snyk\|wiz\|sonarqube\|dependabot <evidence.json\|-> [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled finding checks for that tool against an evidence file. Exit `0` when every selected block-mode id is absent from a finished scan, `1` when an id is open, the scan did not finish, the file names another tool, or the file is malformed or larger than 1 MiB, `2` on bad usage. |
-| `ipso check pulumi <preview.json\|-> [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled OPA checks with `target: pulumi-preview` against the output of `pulumi preview --json`. Print the same verdict lines as `ipso check plan`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when the input is not a preview, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso check cloudformation <template\|-> [--env name] [--input name] [--report file] [--sarif file]` | The same for `target: cloudformation-template` on a CloudFormation template in YAML or JSON, including what `cdk synth` writes. |
-| `ipso check arm <template.json\|-> [--env name] [--input name] [--report file] [--sarif file]` | The same for `target: arm-template` on an ARM template, including what `bicep build` writes. |
-| `ipso check depcruise <path>... [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled `depcruise` checks by running `depcruise` from `PATH` on each verified config. Print the same verdict lines as the other check commands. A violation line is `<slug>: checks[N] (mode): <rule> <from> -> <to>`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when dependency-cruiser is missing or the wrong version, when a cruise fails, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso check semgrep <path>... [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled `semgrep` checks by running the pinned `semgrep` from `PATH` on each verified config. Print the same verdict lines as the other check commands. A violation line is `<slug>: checks[N] (mode): <rule-id> <path>:<line>`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when Semgrep is missing or not the pinned version, when a scan fails, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso check archunit <classes-dir>... --jars <dir> [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled `archunit` checks by running the canonical `ArchitectureTest.java` with the pinned ArchUnit and JUnit jars. Print the same verdict lines as the other check commands. A violation line is `<slug>: checks[N] (mode): <rule-name> <ArchUnit message>`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when `java` or `javac` is missing or older than 17, when a jar does not match its pin, when a rule checks no classes, when a run fails, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso check importlinter <source-dir>... [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled `importlinter` checks by running the pinned import-linter and grimp from `python` on the canonical config and a copy of the `*.py` files of each root package. Repository code is parsed and never imported. Print the same verdict lines as the other check commands. A violation line is `<slug>: checks[N] (mode): <contract-id> <chain or import>`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when `python` is missing or does not carry the pinned release, when a root package is not found, when a run fails, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso check kyverno <path>... [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled `kyverno` checks by running the pinned `kyverno` from `PATH` on the canonical policy and a copy of the `.yaml` and `.yml` files of each named path. Print the same verdict lines as the other check commands. A violation line is `<slug>: checks[N] (mode): <namespace>/<kind>/<name>: <message>`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when `kyverno` is missing or not the pinned release, when a path is missing or unreadable, when a run fails, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso check gatekeeper <path>... [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled Gatekeeper checks by running the pinned `gator` from `PATH` on the canonical template and constraint and a copy of the `.yaml` and `.yml` files of each named path. Print the same verdict lines as the other check commands. A violation line is `<slug>: checks[N] (mode): <namespace>/<kind>/<name>: <message>`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when `gator` is missing or not the pinned release, when a path is missing or unreadable, when the manifests hold a Gatekeeper object or a list, when a run fails, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso check eslint <path>... [--env name] [--input name] [--report file] [--sarif file]` | Evaluate compiled ESLint checks by running the pinned `eslint` from `PATH` on the canonical `eslint.config.mjs`, with a suppressions file that holds `{}`, over each named file or directory. Print the same verdict lines as the other check commands. A violation line is `<slug>: checks[N] (mode): <rule-id> <path>:<line>:<column>: <message>`. Exit `0` when no block-mode check has a violation and no check errors, `1` when one does, when `eslint` is missing, is not the pinned release, or is installed inside the repository, when `typescript-eslint` or `typescript` is not the pinned release for a TypeScript check, when a path is missing or unreadable, when a file could not be parsed, when a run fails, or when `.ipso/build` is missing, `2` on bad usage. |
-| `ipso premise check [--report file]` | Probe premises on in-force decisions with a public HTTPS GET. Print `<path>: <premise-id>: pass`, `fail`, or `error: <reason>`. Exit `0` when every selected probe passed or failed, including when none were selected, `1` when a probe errored, a record is invalid, or two in-force records share an id, `2` on bad usage. The report lists the premise id, the result, the expected and observed values, and the body hash, and it does not contain the response body. The command does not edit the EDR. |
-| `ipso render helm <chart-dir> --out <dir> [--values file]... [--release name] [--namespace name] [--kube-version version]` | Render one chart with the pinned `helm` from `PATH` and write `<dir>/manifests.yaml`. Print `wrote <path>: N documents`, or `1 document`. Exit `0` on success, `1` when `helm` is missing or not the pinned release, when a path is missing, holds a symlink, or leaves the repository, when the output directory holds another file, when the tool fails, or when it renders nothing, `2` on bad usage. A failed render removes the file of the previous one. |
-| `ipso render kustomize <dir> --out <dir>` | Render one directory with the pinned `kustomize` from `PATH`, with the same output and exit codes. Exit `1` also when an entry in `resources`, `bases`, `components`, `generators`, `transformers`, or `validators` is not a file or directory inside the repository. |
-| `ipso rules generate\|check` | Write the decisions in force into the agent rules files in [docs/rules-files.md](docs/rules-files.md), or compare them. `generate` prints `wrote <path>` and `removed <path>`. `check` prints `<path>: out of date`. Exit `0` on success or no difference, `1` on a difference, an invalid decision, or a file the command refuses, `2` on bad usage. |
-| `ipso mcp` | Serve the MCP tools over stdio for the current directory until the client closes the stream. Stdout carries the protocol. Exit `0` on a clean close, `1` on a transport error, `2` on bad usage. |
-| `ipso hook claude-code\|codex\|copilot\|cursor\|kiro [event] [--bundle dir --digest sha256:hex --key public.pem]` | Answer one hook event from stdin in that agent's format. Exit `0` for any answer, including a denial, except `2` for a Kiro refusal, which has no other form, and `2` on bad usage. |
-| `ipso compile` | Compile checks on in-force records into `.ipso/build/`. An OPA check with `ref: ipso:<provider>/<name>` and `target: terraform-plan` compiles a built-in template ([docs/templates.md](docs/templates.md)). A depcruise check writes `depcruise.json` from a JSON rule file. A Semgrep check writes `semgrep.yaml` from a YAML rule file or a built-in template ([docs/semgrep-templates.md](docs/semgrep-templates.md)). A ci-binding check writes `binding.json` from `job`. A Checkov check writes `binding.json` from `ref`. A snyk, wiz, sonarqube, or dependabot check writes `binding.json` from `ref`. An ArchUnit check writes `ArchitectureTest.java` from a JSON rule file ([docs/archunit-rules.md](docs/archunit-rules.md)). An import-linter check writes `importlinter.ini` from an `.importlinter` file. A Kyverno check writes `kyverno.yaml` from a ValidatingPolicy. An OPA check with `target: gatekeeper` writes `constraint-template.yaml` and `constraint.yaml`. An ESLint check writes `eslint.config.mjs` from a JSON rule file ([docs/eslint-rules.md](docs/eslint-rules.md)). Print `<path>: checks[N] (engine): compiled K artifacts`, `<path>: checks[N] (engine): no compiler`, `<path>: checks[N] (engine): advisory, not compiled`, `<path>: skipped, not in force`, or `no EDR files found`. Exit `0` when every in-force check compiles or has no compiler, `1` when a record is invalid, a compile fails, two records share an id, or `.ipso/build` is a symlink, `2` on bad usage. A failure leaves the previous build in place. |
-| `ipso help`, `ipso -h`, `ipso --help` | Print usage and exit `0`. |
-| `ipso version`, `ipso -v`, `ipso --version` | Print `ipso <version> (<commit>, <date>)` and usage, then exit `0`. |
-
-### Config
-
-`.ipso/config.yaml`:
+`ipso init` creates `.ipso/config.yaml` with the default glob (used automatically if the config file is absent):
 
 ```yaml
 decisions:
   - docs/decisions/**/*.md
 ```
 
-`decisions` must list at least one glob. Paths are relative to the repository root. A missing config file uses the default above.
+Place your EDR Markdown files under `docs/decisions/`, then run `ipso check` and `ipso compile`.
+
+## Supported check engines
+
+`ipso compile` compiles in-force decisions (`accepted`, `verified`, or `needs-review` within `[valid_from, valid_to)`) into `.ipso/build/`. Every engine check accepts `--sarif <file>` for GitHub Code Scanning ([docs/sarif.md](docs/sarif.md)) and `--report <file>` for structured verdict evidence.
+
+| Engine / target | Input rule format | CLI command | Documentation |
+| --- | --- | --- | --- |
+| OPA (`terraform-plan`) | Repository `.rego` or built-in `ipso:<provider>/<name>` template | `ipso check plan <plan.json>` (or `-`) | [docs/templates.md](docs/templates.md) |
+| OPA (`pulumi-preview`, `cloudformation-template`, `arm-template`) | Repository `.rego` | `ipso check pulumi`, `ipso check cloudformation`, `ipso check arm` | [docs/adapters.md](docs/adapters.md) |
+| OPA (`gatekeeper`) | ConstraintTemplate + Constraint YAML | `ipso check gatekeeper <path>...` | [docs/kubernetes.md](docs/kubernetes.md) |
+| Kyverno | ValidatingPolicy YAML | `ipso check kyverno <path>...` | [docs/kubernetes.md](docs/kubernetes.md) |
+| Semgrep | Repository YAML or built-in `ipso:<lang>/<name>` template | `ipso check semgrep <path>...` | [docs/semgrep-templates.md](docs/semgrep-templates.md) |
+| dependency-cruiser | JSON rule file | `ipso check depcruise <path>...` | [docs/cli-reference.md](docs/cli-reference.md#engine-compiler-rules) |
+| ArchUnit | JSON rule file | `ipso check archunit <classes-dir>... --jars <dir>` | [docs/archunit-rules.md](docs/archunit-rules.md) |
+| import-linter | `.importlinter` INI file | `ipso check importlinter <source-dir>...` | [docs/cli-reference.md](docs/cli-reference.md#engine-compiler-rules) |
+| ESLint | JSON rule file (`javascript` or `typescript`) | `ipso check eslint <path>...` | [docs/eslint-rules.md](docs/eslint-rules.md) |
+| CI job binding | Existing CI job name (`engine: ci-binding`) | `ipso check ci <evidence.json> --sha <sha>` (or `-`) | [docs/cli-reference.md](docs/cli-reference.md#ci-job-evidence) |
+| Checkov | Checkov check ID (`ref: CKV_*`) | `ipso check checkov <results.json>` (or `-`) | [docs/cli-reference.md](docs/cli-reference.md#engine-compiler-rules) |
+| Security scanners (`snyk`, `wiz`, `sonarqube`, `dependabot`) | Scanner finding ID in `ref` | `ipso check <tool> <evidence.json>` (or `-`) | [docs/cli-reference.md](docs/cli-reference.md#security-tool-evidence) |
+| LLM (`engine: llm`) | `.llm.json` check specification | `ipso check llm <input>` (or `-`) | [docs/cli-reference.md](docs/cli-reference.md#command-reference) |
+
+## Commands
+
+Run all commands from the repository root. See [docs/cli-reference.md](docs/cli-reference.md) for complete flags, compiler validation rules, pinned tool versions, evidence schemas, and output formats.
+
+### Authoring and validation
+
+| Command | Purpose |
+| --- | --- |
+| `ipso init` | Create `.ipso/config.yaml` with the default decisions glob |
+| `ipso check` | Validate all matched EDR files against the embedded EDR schema and required headings |
+| `ipso explain <slug>` | Display metadata, sources, and the `## Decision` section for one EDR |
+| `ipso import [path...]` | Convert MADR or Nygard ADRs under `docs/adr` and `docs/decisions` into inferred EDR files |
+| `ipso premise check [--report file]` | Probe premises on in-force decisions via public HTTPS GET without editing EDR files |
+
+### Compiling and evaluating checks
+
+| Command | Purpose |
+| --- | --- |
+| `ipso compile` | Compile in-force checks into `.ipso/build/` |
+| `ipso check plan <plan.json>` (or `-`) | Evaluate compiled OPA checks against `terraform show -json` or `tofu show -json` (or a signed bundle via `--bundle`) |
+| `ipso check <engine> ...` | Run compiled checks for `ci`, `checkov`, `snyk`, `wiz`, `sonarqube`, `dependabot`, `pulumi`, `cloudformation`, `arm`, `depcruise`, `semgrep`, `archunit`, `importlinter`, `kyverno`, `gatekeeper`, `eslint`, or `llm` |
+| `ipso render helm` / `kustomize` | Render Helm charts or Kustomize overlays offline into plain manifests for `kyverno` and `gatekeeper` checks |
+
+### Baselines and signed bundles
+
+| Command | Purpose |
+| --- | --- |
+| `ipso baseline create` / `update <subcommand> <args>` | Record or trim existing violation fingerprints in `.ipso/baseline.json` so legacy findings are waived ([docs/baseline.md](docs/baseline.md)) |
+| `ipso baseline export <decision-id>` | Print sorted fingerprints for one decision as JSON for control-plane upload |
+| `ipso bundle pack` / `sign` / `verify` | Package `.ipso/build/` as an OCI layout, sign with PKCS#8 P-256, and verify offline |
+
+### AI coding agents and control plane
+
+| Command | Purpose |
+| --- | --- |
+| `ipso rules generate` / `check` | Sync in-force decisions into `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, Copilot, Cursor, and Kiro rules files ([docs/rules-files.md](docs/rules-files.md)) |
+| `ipso mcp` | Serve local decisions and evaluation tools over stdio MCP ([docs/mcp.md](docs/mcp.md)) |
+| `ipso hook <agent> [event]` | Evaluate `agent-edit` checks for Claude Code, Codex, Copilot, Cursor, and Kiro hooks ([docs/hooks.md](docs/hooks.md)) |
+| `ipso login` / `ipso logout` | Authenticate via loopback PKCE for optional control-plane commands |
+| `ipso status` / `ipso draft` | Query decision health or draft decisions against a control plane |
+| `ipso deliver <file>` (or `-`, or `--repo <owner/name>`) | Deliver accepted checks from a control plane into the repository ([docs/deliver.md](docs/deliver.md)) |
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success |
-| `1` | Runtime failure (I/O, validation failure, missing or ambiguous slug) |
-| `2` | Usage error |
+| `0` | Success (no blocking violations and no runtime errors) |
+| `1` | Runtime failure, validation error, blocking violation, or missing/ambiguous slug |
+| `2` | Invalid command or flag usage |
 
-## Release
+## CI/CD and platform integrations
 
-A push to `main` opens a release-please pull request. Merging it tags `vX.Y.Z` and starts the build on that tag, with no other step. From v0.1.1, that tag is built by the pinned reusable workflow in `ipsofacto-io/.github`. The build publishes binaries, `checksums.txt`, a CycloneDX SBOM, keyless cosign signatures, and GitHub artifact attestations. The image is `ghcr.io/ipsofacto-io/ipso`. v0.1.1 is the first SLSA Build Level 3 release. v0.1.0 keeps its original bytes and has cosign signatures and a CycloneDX SBOM; it is not Level 3. The GHCR package is still private. The Homebrew cask is published to `ipsofacto-io/homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set on this repository. That secret is not set yet, so `brew install` finds nothing until it is.
+| Integration | Location / guide |
+| --- | --- |
+| GitHub Actions | [`ipsofacto-io/ipso-action`](https://github.com/ipsofacto-io/ipso-action) and [docs/github-action.md](docs/github-action.md) |
+| GitLab CI/CD Catalog component | [`packaging/gitlab`](packaging/gitlab) and [docs/gitlab.md](docs/gitlab.md) |
+| Azure Pipelines task | [`packaging/azure-pipelines`](packaging/azure-pipelines) and [docs/azure-pipelines.md](docs/azure-pipelines.md) |
+| Atlantis | [docs/atlantis.md](docs/atlantis.md) |
+| Spacelift, env0, and Scalr | [docs/platforms.md](docs/platforms.md) |
+| Backstage plugin | [`packaging/backstage`](packaging/backstage) |
+| AI coding agents (Claude Code, Codex, Copilot, Cursor, Kiro) | [`ipsofacto-io/agent-plugins`](https://github.com/ipsofacto-io/agent-plugins), [docs/hooks.md](docs/hooks.md), [docs/mcp.md](docs/mcp.md) |
+
+## Security model
+
+- **Offline by default:** Validation, compilation, deterministic plan/code/manifest checks, baselines, bundles, `ipso rules`, `ipso mcp`, and `ipso hook` make no network calls. Network connections occur only in `ipso premise check` (public HTTPS GET, no credentials, no redirects, no private IPs), explicit control-plane commands (`ipso login`, `ipso status`, `ipso draft`, `ipso deliver --repo`), and `ipso check llm` when compiled LLM checks run via a control plane (`--server` or logged-in session) or direct BYOLLM (`--llm-url` and `--llm-model`).
+- **No untrusted repo code execution:** Compilers reject code-loading options, inline suppressions, symlinks, and network/cluster context hooks, and check runners re-verify compiled artifacts before invoking pinned external engines.
+- **Keep runner secrets out of engine steps:** External engines (JVM, Python, Node, Helm, Kustomize, Kyverno, gator) inherit non-stripped runner environment variables and are not an OS sandbox. Run check steps without unrelated secrets.
+- **Report vulnerabilities privately:** Use [GitHub private vulnerability reporting](https://github.com/ipsofacto-io/ipso/security/advisories/new) rather than opening a public issue. See [SECURITY.md](https://github.com/ipsofacto-io/.github/blob/main/SECURITY.md).
+
+Read [docs/security.md](docs/security.md) for the complete per-engine isolation and hardening rules.
+
+## Documentation
+
+- [CLI reference and compiler rules](docs/cli-reference.md)
+- [Security and engine isolation details](docs/security.md)
+- [Built-in Terraform OPA templates](docs/templates.md) and [Semgrep templates](docs/semgrep-templates.md)
+- [IaC adapters (Pulumi, CloudFormation, CDK, Bicep)](docs/adapters.md)
+- [Kubernetes rendering and checks (Helm, Kustomize, Kyverno, Gatekeeper)](docs/kubernetes.md)
+- [ArchUnit rules](docs/archunit-rules.md) and [ESLint rules](docs/eslint-rules.md)
+- [SARIF output](docs/sarif.md), [Baselines](docs/baseline.md), and [Delivering accepted checks](docs/deliver.md)
+- [AI agent hooks](docs/hooks.md), [Local MCP server](docs/mcp.md), and [Agent rules files](docs/rules-files.md)
+
+## Public Go packages
+
+This module never depends on `ipso-server`. Public packages under `pkg/` keep CLI and control-plane evaluation aligned while everything else stays under `internal/`:
+
+- `pkg/edrcheck` and `pkg/edrrender`: validate and render EDR files using the embedded EDR 1.1.0 schema.
+- `pkg/plancheck`: evaluate a Terraform/OpenTofu plan against a signed policy bundle.
+- `pkg/rulecheck`: vet and evaluate `agent-edit` Rego rules.
+- `pkg/llmcheck`: vet `.llm.json` specs, redact inputs, and verify verbatim quotes for `engine: llm` checks.
+- `pkg/premisecheck`: probe premise URLs with the shared client and network policy.
+- `pkg/mcptools`: shared MCP tool contract (`decisions.applicable`, `decisions.get`, `decisions.health`, `decisions.verifiability`, `checks.evaluate`, `decisions.propose`).
+
+## Releases
+
+Pushes to `main` open a `release-please` pull request; merging it tags `vX.Y.Z` and triggers the pinned SLSA Build Level 3 release workflow in `ipsofacto-io/.github` (from v0.1.1 onward). Each release publishes binaries, `checksums.txt`, a CycloneDX SBOM, keyless cosign signatures, and GitHub artifact attestations.
 
 ## License
 
@@ -194,4 +168,4 @@ Copyright 2026 Luca Bertelli.
 
 ## Contributing
 
-Follow the contributor terms in [ipsofacto-io/.github](https://github.com/ipsofacto-io/.github/blob/main/CONTRIBUTING.md). Commits need a `Signed-off-by` trailer (`git commit -s`).
+Follow the contributor guidelines in [ipsofacto-io/.github](https://github.com/ipsofacto-io/.github/blob/main/CONTRIBUTING.md). All commits require a `Signed-off-by` trailer (`git commit -s`).
