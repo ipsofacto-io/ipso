@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/ipsofacto-io/ipso/compare/v0.5.0...v0.6.0) (2026-11-26)
+
+
+### Features
+
+* add EDR 1.1 llm compiler, loopback PKCE login, and health CLI and MCP tools ([#75](https://github.com/ipsofacto-io/ipso/issues/75)) ([93afaf3](https://github.com/ipsofacto-io/ipso/commit/93afaf3809ad7c80e68fcee9677d2353c3c42724))
+* add the Azure Pipelines task ([#69](https://github.com/ipsofacto-io/ipso/issues/69)) ([f83d2c5](https://github.com/ipsofacto-io/ipso/commit/f83d2c5eae25a5048bb8acb69214f4525136e65d))
+* **backstage:** show decisions in force for a catalog entity ([27a4dc2](https://github.com/ipsofacto-io/ipso/commit/27a4dc2f785d355121e9980224cea88b716ed80b))
+* **cli:** deliver accepted agent-edit checks into a repository ([#64](https://github.com/ipsofacto-io/ipso/issues/64)) ([5752015](https://github.com/ipsofacto-io/ipso/commit/5752015d2b4b7a67928964135790b1d101f57622))
+* **cli:** export the fingerprints of one decision without the salt ([#66](https://github.com/ipsofacto-io/ipso/issues/66)) ([c59be6a](https://github.com/ipsofacto-io/ipso/commit/c59be6a7eb32ae932e27482e1c21f2cb9a14042c))
+* **cli:** write the digests of the violations of a check in the verdict report ([#67](https://github.com/ipsofacto-io/ipso/issues/67)) ([0a222af](https://github.com/ipsofacto-io/ipso/commit/0a222af5bf0601e1be3c135a144e1942f1aaedca))
+* **deliver:** deliver built-in template checks as a ref with no file ([#76](https://github.com/ipsofacto-io/ipso/issues/76)) ([808d563](https://github.com/ipsofacto-io/ipso/commit/808d563ea417f42896755f6af5bc2a248490f03b))
+* **edr:** embed the EDR 1.0.0 schema ([#73](https://github.com/ipsofacto-io/ipso/issues/73)) ([64f72d4](https://github.com/ipsofacto-io/ipso/commit/64f72d47cc2bc76e6cbb8e069aad1c9fb808210d))
+* evaluate snyk, wiz, sonarqube, and dependabot evidence ([#70](https://github.com/ipsofacto-io/ipso/issues/70)) ([e77b588](https://github.com/ipsofacto-io/ipso/commit/e77b5887bdfcd9a2037576c697ed735b6f4f2fee))
+* **gitlab:** add a CI component that blocks on a violation ([#71](https://github.com/ipsofacto-io/ipso/issues/71)) ([f61d277](https://github.com/ipsofacto-io/ipso/commit/f61d277daebdb622f8ef31f0a47a6896841409ec))
+
 ## [0.5.0](https://github.com/ipsofacto-io/ipso/compare/v0.4.0...v0.5.0) (2026-11-12)
 
 
